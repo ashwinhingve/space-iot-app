@@ -18,6 +18,7 @@ import {
 import { AppDispatch } from '@/store/store';
 import { io } from 'socket.io-client';
 import { Badge } from '@/components/ui/badge';
+import { SOCKET_CONFIG } from '@/lib/config';
 
 interface DeviceCardProps {
   device: {
@@ -86,12 +87,7 @@ export const DeviceCard = ({ device }: DeviceCardProps) => {
     // so we don't need to do it here again
     
     // Connect to Socket.io for real-time updates
-    socketRef.current = io('http://localhost:5000', {
-      transports: ['websocket', 'polling'],
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
-      timeout: 10000
-    });
+    socketRef.current = io(SOCKET_CONFIG.URL, SOCKET_CONFIG.OPTIONS);
     
     const socket = socketRef.current;
     

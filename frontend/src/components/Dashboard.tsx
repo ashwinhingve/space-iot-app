@@ -20,7 +20,8 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
-import { io, Socket } from 'socket.io-client';
+import { io } from 'socket.io-client';
+import { SOCKET_CONFIG } from '@/lib/config';
 
 // Sample Chart Implementation (can be replaced with actual Recharts implementation)
 const SimpleChart = ({ data = [25, 36, 43, 29, 40, 27, 33] }) => {
@@ -127,13 +128,8 @@ export const Dashboard: React.FC = () => {
   const socketRef = React.useRef<Socket | null>(null);
   
   useEffect(() => {
-    // Connect to Socket.io for real-time updates
-    socketRef.current = io('http://localhost:5000', {
-      transports: ['websocket', 'polling'],
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
-      timeout: 10000
-    });
+    // Connect to socket server
+    socketRef.current = io(SOCKET_CONFIG.URL, SOCKET_CONFIG.OPTIONS);
     
     const socket = socketRef.current;
     

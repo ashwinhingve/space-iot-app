@@ -1,4 +1,5 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { API_ENDPOINTS } from '@/lib/config';
 
 interface User {
   id: string;
@@ -31,7 +32,7 @@ const initialState: AuthState = {
 export const login = createAsyncThunk(
   'auth/login',
   async (credentials: { email: string; password: string }) => {
-    const response = await fetch('http://localhost:5000/api/auth/login', {
+    const response = await fetch(API_ENDPOINTS.LOGIN, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -44,17 +45,15 @@ export const login = createAsyncThunk(
     }
 
     const data = await response.json();
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('token', data.token);
-    }
+    localStorage.setItem('token', data.token);
     return data;
   }
 );
 
 export const register = createAsyncThunk(
   'auth/register',
-  async (userData: { email: string; password: string; name: string }) => {
-    const response = await fetch('http://localhost:5000/api/auth/register', {
+  async (userData: { name: string; email: string; password: string }) => {
+    const response = await fetch(API_ENDPOINTS.REGISTER, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -67,9 +66,7 @@ export const register = createAsyncThunk(
     }
 
     const data = await response.json();
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('token', data.token);
-    }
+    localStorage.setItem('token', data.token);
     return data;
   }
 );
