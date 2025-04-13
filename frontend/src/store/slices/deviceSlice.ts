@@ -1,4 +1,5 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { API_ENDPOINTS } from '@/lib/config';
 
 interface Device {
   _id: string;
@@ -38,7 +39,7 @@ export const fetchDevices = createAsyncThunk(
   'devices/fetchDevices',
   async (_, { getState }) => {
     const state = getState() as { auth: { token: string } };
-    const response = await fetch('http://localhost:5000/api/devices', {
+    const response = await fetch(API_ENDPOINTS.DEVICES, {
       headers: {
         Authorization: `Bearer ${state.auth.token}`,
       },
@@ -56,7 +57,7 @@ export const createDevice = createAsyncThunk(
   'devices/createDevice',
   async (deviceData: { name: string; type: string; mqttTopic: string }, { getState }) => {
     const state = getState() as { auth: { token: string } };
-    const response = await fetch('http://localhost:5000/api/devices', {
+    const response = await fetch(API_ENDPOINTS.DEVICES, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -77,7 +78,7 @@ export const controlDevice = createAsyncThunk(
   'devices/controlDevice',
   async ({ deviceId, value }: { deviceId: string; value: number }, { getState }) => {
     const state = getState() as { auth: { token: string } };
-    const response = await fetch(`http://localhost:5000/api/devices/${deviceId}/control`, {
+    const response = await fetch(API_ENDPOINTS.DEVICE_CONTROL(deviceId), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -98,7 +99,7 @@ export const deleteDevice = createAsyncThunk(
   'devices/deleteDevice',
   async (deviceId: string, { getState }) => {
     const state = getState() as { auth: { token: string } };
-    const response = await fetch(`http://localhost:5000/api/devices/${deviceId}`, {
+    const response = await fetch(API_ENDPOINTS.DEVICE_DETAIL(deviceId), {
       method: 'DELETE',
       headers: {
         Authorization: `Bearer ${state.auth.token}`,
