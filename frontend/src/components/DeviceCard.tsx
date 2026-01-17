@@ -200,13 +200,13 @@ export const DeviceCard = ({ device }: DeviceCardProps) => {
       case 'switch':
         return (
           <div className="mt-4 space-y-4">
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-center p-3 rounded-lg bg-secondary/50">
               <span className="text-sm font-medium">Power</span>
-              {/* Simplified button logic that more clearly represents the on/off state */}
               {isOn ? (
                 <Button
                   variant="default"
-                  className="bg-blue-500 hover:bg-blue-600 text-white"
+                  size="sm"
+                  className="bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white shadow-sm hover:shadow-md btn-hover-lift"
                   onClick={() => handleControl(0)}
                   disabled={localStatus !== 'online'}
                 >
@@ -214,7 +214,9 @@ export const DeviceCard = ({ device }: DeviceCardProps) => {
                 </Button>
               ) : (
                 <Button
-                  variant="destructive"
+                  variant="outline"
+                  size="sm"
+                  className="border-primary/20 hover:bg-primary/5 btn-hover-lift"
                   onClick={() => handleControl(1)}
                   disabled={localStatus !== 'online'}
                 >
@@ -222,36 +224,40 @@ export const DeviceCard = ({ device }: DeviceCardProps) => {
                 </Button>
               )}
             </div>
-            
-            <div className="flex justify-between items-center">
-              <span className="text-sm font-medium">Status</span>
+
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-muted-foreground">Connection</span>
               <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${localStatus === 'online' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
-                <span className="text-sm capitalize">{localStatus}</span>
+                <div className={`w-2 h-2 rounded-full ${localStatus === 'online' ? 'bg-emerald-500' : 'bg-red-500'} ${localStatus === 'online' ? 'animate-pulse' : ''}`}></div>
+                <span className="capitalize font-medium">{localStatus}</span>
               </div>
             </div>
           </div>
         );
       case 'sensor':
         return (
-          <div className="mt-4 space-y-4">
+          <div className="mt-4 space-y-3">
             {(localData.temperature !== undefined || device.lastData?.value !== undefined) && (
-              <div className="flex justify-between items-center">
+              <div className="flex justify-between items-center p-3 rounded-lg bg-gradient-to-r from-orange-500/10 to-red-500/10 border border-orange-500/20">
                 <span className="text-sm font-medium">Temperature</span>
-                <span className="font-medium">{localData.temperature || device.lastData?.value || 0}°C</span>
+                <span className="text-lg font-semibold text-orange-600 dark:text-orange-400">
+                  {localData.temperature || device.lastData?.value || 0}°C
+                </span>
               </div>
             )}
             {localData.humidity !== undefined && (
-              <div className="flex justify-between items-center">
+              <div className="flex justify-between items-center p-3 rounded-lg bg-gradient-to-r from-blue-500/10 to-cyan-500/10 border border-blue-500/20">
                 <span className="text-sm font-medium">Humidity</span>
-                <span className="font-medium">{localData.humidity}%</span>
+                <span className="text-lg font-semibold text-blue-600 dark:text-blue-400">
+                  {localData.humidity}%
+                </span>
               </div>
             )}
-            <div className="flex justify-between items-center">
-              <span className="text-sm font-medium">Status</span>
+            <div className="flex justify-between items-center text-sm pt-2">
+              <span className="text-muted-foreground">Connection</span>
               <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${localStatus === 'online' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
-                <span className="text-sm capitalize">{localStatus}</span>
+                <div className={`w-2 h-2 rounded-full ${localStatus === 'online' ? 'bg-emerald-500' : 'bg-red-500'} ${localStatus === 'online' ? 'animate-pulse' : ''}`}></div>
+                <span className="capitalize font-medium">{localStatus}</span>
               </div>
             </div>
           </div>
@@ -259,65 +265,69 @@ export const DeviceCard = ({ device }: DeviceCardProps) => {
       default:
         return (
           <div className="mt-4 space-y-4">
-            <div className="text-sm text-muted-foreground">
-              Last value: {device.lastData.value}
+            <div className="p-3 rounded-lg bg-secondary/50 border border-border">
+              <div className="text-xs text-muted-foreground mb-1">Last Value</div>
+              <div className="text-lg font-semibold">{device.lastData.value}</div>
             </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm font-medium">Status</span>
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-muted-foreground">Connection</span>
               <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${localStatus === 'online' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
-                <span className="text-sm capitalize">{localStatus}</span>
+                <div className={`w-2 h-2 rounded-full ${localStatus === 'online' ? 'bg-emerald-500' : 'bg-red-500'} ${localStatus === 'online' ? 'animate-pulse' : ''}`}></div>
+                <span className="capitalize font-medium">{localStatus}</span>
               </div>
             </div>
           </div>
         );
     }
   };
-  
+
   return (
-    <Card className="overflow-hidden">
+    <Card className="card-premium group">
       <CardHeader className="pb-4">
         <div className="flex justify-between items-start">
-          <div className="flex items-center gap-2">
-            <div className="flex items-center justify-center w-10 h-10 rounded-full bg-primary/10 text-primary">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-brand-500/10 to-purple-500/10 text-brand-600 dark:text-brand-400 group-hover:scale-110 transition-transform duration-300">
               {deviceIcon}
             </div>
             <div>
-              <CardTitle className="text-lg">{device.name}</CardTitle>
-              <div className="flex items-center text-sm text-muted-foreground">
+              <CardTitle className="text-lg font-semibold">{device.name}</CardTitle>
+              <div className="flex items-center gap-1.5 text-sm text-muted-foreground mt-1">
                 <span className="capitalize">{device.type}</span>
               </div>
             </div>
           </div>
-          <Badge
-            variant={localStatus === 'online' ? 'success' : 'destructive'}
-          >
-            {localStatus}
-          </Badge>
+          <div className="relative">
+            <Badge
+              variant={localStatus === 'online' ? 'success' : 'destructive'}
+              className={localStatus === 'online' ? 'status-pulse' : ''}
+            >
+              {localStatus}
+            </Badge>
+          </div>
         </div>
       </CardHeader>
-      
+
       <CardContent className="pb-4">
         <div className="space-y-4">
           {renderDeviceContent()}
-          
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Last Update</span>
-            <span className="text-sm">
+
+          <div className="flex items-center justify-between pt-3 border-t border-border/50">
+            <span className="text-xs text-muted-foreground">Last Update</span>
+            <span className="text-xs font-mono text-foreground/80">
               {formattedLastUpdate}
             </span>
           </div>
         </div>
       </CardContent>
-      
-      <CardFooter className="flex justify-between pt-2 pb-4">
-        <Button 
-          variant="outline" 
-          size="sm" 
-          className="w-full"
+
+      <CardFooter className="flex justify-between pt-0 pb-4">
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full group/btn hover:bg-primary/5 hover:border-primary/30 btn-hover-lift"
           onClick={handleSelect}
         >
-          <ExternalLink className="h-4 w-4 mr-2" />
+          <ExternalLink className="h-4 w-4 mr-2 group-hover/btn:translate-x-0.5 group-hover/btn:-translate-y-0.5 transition-transform" />
           View Details
         </Button>
       </CardFooter>

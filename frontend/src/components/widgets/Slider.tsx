@@ -18,6 +18,8 @@ export const SliderWidget: React.FC<SliderWidgetProps> = ({
   step = 1,
   onChange
 }) => {
+  const safeValue = typeof value === 'number' && !isNaN(value) ? value : min;
+
   return (
     <div className="p-4 bg-background border border-border rounded-lg transition-colors duration-200">
       <label className="text-sm font-medium text-foreground mb-2 block">
@@ -25,7 +27,7 @@ export const SliderWidget: React.FC<SliderWidgetProps> = ({
       </label>
       <SliderPrimitive.Root
         className="relative flex items-center select-none touch-none w-full h-5"
-        value={[value]}
+        value={[safeValue]}
         onValueChange={([newValue]) => onChange(newValue)}
         max={max}
         min={min}
@@ -39,7 +41,7 @@ export const SliderWidget: React.FC<SliderWidgetProps> = ({
         />
       </SliderPrimitive.Root>
       <div className="mt-2 text-sm text-muted-foreground text-right">
-        {value}
+        {safeValue}
       </div>
     </div>
   );

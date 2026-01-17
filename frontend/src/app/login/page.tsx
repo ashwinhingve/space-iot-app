@@ -1,26 +1,41 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { login } from '@/store/slices/authSlice';
+import { login, clearError } from '@/store/slices/authSlice';
 import { Button } from '@/components/ui/button';
+import { GoogleAuthButton } from '@/components/GoogleAuthButton';
 import { RootState, AppDispatch } from '@/store/store';
 import { motion } from 'framer-motion';
-import { ArrowRight, Lock, Mail } from 'lucide-react';
+import { ArrowRight, Lock, Mail, AlertCircle } from 'lucide-react';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const dispatch = useDispatch<AppDispatch>();
   const router = useRouter();
-  const { loading, error } = useSelector((state: RootState) => state.auth);
+  const { loading, error, isAuthenticated } = useSelector((state: RootState) => state.auth);
+
+  // Clear error when component mounts
+  useEffect(() => {
+    dispatch(clearError());
+  }, [dispatch]);
+
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.push('/dashboard');
+    }
+  }, [isAuthenticated, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    dispatch(clearError());
+
     try {
-      await dispatch(login({ email, password }));
+      await dispatch(login({ email, password })).unwrap();
       router.push('/dashboard');
     } catch (error) {
       console.error('Login failed:', error);
@@ -36,9 +51,9 @@ export default function LoginPage() {
           </span>
         </Link>
       </header>
-      
+
       <div className="flex-1 flex items-center justify-center p-6">
-        <motion.div 
+        <motion.div
           className="w-full max-w-md space-y-8"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -50,8 +65,27 @@ export default function LoginPage() {
               Sign in to your account to continue
             </p>
           </div>
-          
+
           <div className="bg-card p-8 border rounded-lg shadow-sm">
+            {/* Google Sign-In Button */}
+            <div className="mb-6">
+              <GoogleAuthButton
+                onError={(err) => console.error(err)}
+              />
+            </div>
+
+            <div className="relative my-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-card text-muted-foreground">
+                  Or continue with email
+                </span>
+              </div>
+            </div>
+
+            {/* Email/Password Login Form */}
             <form className="space-y-6" onSubmit={handleSubmit}>
               <div className="space-y-4">
                 <div>
@@ -75,7 +109,7 @@ export default function LoginPage() {
                     />
                   </div>
                 </div>
-                
+
                 <div>
                   <label htmlFor="password" className="block text-sm font-medium mb-1">
                     Password
@@ -99,32 +133,10 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <input
-                    id="remember-me"
-                    name="remember-me"
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-gray-300"
-                  />
-                  <label htmlFor="remember-me" className="ml-2 block text-sm text-muted-foreground">
-                    Remember me
-                  </label>
-                </div>
-
-                <div className="text-sm">
-                  <Link
-                    href="/forgot-password"
-                    className="text-primary hover:text-primary/80"
-                  >
-                    Forgot your password?
-                  </Link>
-                </div>
-              </div>
-
               {error && (
-                <div className="p-3 bg-destructive/10 text-destructive text-sm rounded-md">
-                  {error}
+                <div className="flex items-center gap-2 p-3 bg-destructive/10 text-destructive text-sm rounded-md">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                  <span>{error}</span>
                 </div>
               )}
 
@@ -138,7 +150,7 @@ export default function LoginPage() {
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </form>
-            
+
             <div className="mt-6 text-center text-sm">
               <p className="text-muted-foreground">
                 Don&apos;t have an account?{' '}
@@ -152,4 +164,4 @@ export default function LoginPage() {
       </div>
     </div>
   );
-} 
+}

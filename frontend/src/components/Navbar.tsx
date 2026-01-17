@@ -16,7 +16,8 @@ const navLinks = [
   { name: 'Home', href: '/' },
   { name: 'Dashboard', href: '/dashboard' },
   { name: 'Devices', href: '/devices' },
-  { name: 'Documentation', href: '/documentation' }
+  { name: 'Documentation', href: '/documentation' },
+  { name: 'manifolds', href: '/manifolds' }
 ]
 
 export function Navbar() {
@@ -31,28 +32,28 @@ export function Navbar() {
   }
 
   return (
-    <nav className="fixed top-0 z-50 w-full border-b border-border/50 bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-      <div className="container flex h-16 items-center justify-between">
+    <nav className="fixed top-0 z-50 w-full glass-nav shadow-sm animate-slide-down">
+      <div className="container flex h-16 items-center justify-between px-4 md:px-6">
         <div className="flex items-center gap-6">
-          <Link 
-            href="/" 
-            className="flex items-center space-x-2"
+          <Link
+            href="/"
+            className="flex items-center space-x-2 group"
           >
-            <span className="font-bold text-xl inline-block bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+            <span className="font-bold text-xl inline-block bg-gradient-to-r from-brand-500 via-purple-500 to-brand-600 bg-clip-text text-transparent transition-transform hover:scale-105 active:scale-98">
               IoT Space
             </span>
           </Link>
-          
+
           {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center gap-8">
+          <div className="hidden md:flex items-center gap-1">
             {navLinks.map((link) => (
-              <Link 
-                key={link.name} 
+              <Link
+                key={link.name}
                 href={link.href}
-                className="text-sm font-medium text-muted-foreground transition-colors hover:text-primary relative group"
+                className="text-sm font-medium text-muted-foreground px-3 py-2 rounded-lg relative group overflow-hidden transition-colors hover:text-foreground"
               >
-                {link.name}
-                <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-primary group-hover:w-full transition-all duration-300"></span>
+                <span className="relative z-10">{link.name}</span>
+                <span className="absolute inset-0 bg-primary/10 scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-left"></span>
               </Link>
             ))}
           </div>
@@ -65,31 +66,31 @@ export function Navbar() {
           {user ? (
             <div className="hidden md:flex items-center gap-4">
               <span className="text-sm text-muted-foreground">
-                Welcome, <span className="text-primary">{user.name}</span>
+                Welcome, <span className="font-medium text-primary">{user.name}</span>
               </span>
-              <Button 
-                variant="ghost" 
-                size="sm" 
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={handleLogout}
-                className="text-muted-foreground hover:text-foreground hover:bg-primary/10"
+                className="text-muted-foreground hover:text-foreground hover:bg-primary/10 btn-hover-lift"
               >
                 Logout
               </Button>
             </div>
           ) : (
-            <div className="hidden md:flex items-center gap-3">
-              <Button 
-                variant="ghost" 
-                size="sm" 
+            <div className="hidden md:flex items-center gap-4">
+              <Button
+                variant="ghost"
+                size="sm"
                 asChild
                 className="text-muted-foreground hover:text-foreground hover:bg-primary/10"
               >
                 <Link href="/login">Login</Link>
               </Button>
-              <Button 
-                size="sm" 
+              <Button
+                size="sm"
                 asChild
-                className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white border-0"
+                className="relative overflow-hidden bg-gradient-to-r from-brand-500 via-purple-500 to-brand-600 hover:shadow-glow text-white border-0 btn-hover-lift"
               >
                 <Link href="/register">Register</Link>
               </Button>
@@ -111,26 +112,26 @@ export function Navbar() {
       {/* Mobile navigation menu */}
       <AnimatePresence>
         {isMenuOpen && (
-          <motion.div 
-            className="md:hidden" 
-            initial={{ opacity: 0, height: 0 }} 
-            animate={{ opacity: 1, height: 'auto' }} 
+          <motion.div
+            className="md:hidden border-t border-border/50"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.2 }}
           >
-            <div className="container py-4 space-y-4 bg-background/95 backdrop-blur">
+            <div className="container py-4 space-y-2 bg-background/95 backdrop-blur-xl px-4 md:px-6">
               {navLinks.map((link) => (
-                <Link 
-                  key={link.name} 
+                <Link
+                  key={link.name}
                   href={link.href}
-                  className="block py-3 text-sm font-medium text-muted-foreground hover:text-primary transition-colors"
+                  className="block py-3 px-4 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-primary/5 rounded-lg transition-all"
                   onClick={() => setIsMenuOpen(false)}
                 >
                   {link.name}
                 </Link>
               ))}
-              
-              <div className="border-t border-border pt-4 mt-4">
+
+              <div className="border-t border-border/50 pt-4 mt-4">
                 {user ? (
                   <div className="space-y-3">
                     <p className="text-sm text-muted-foreground">
@@ -150,30 +151,30 @@ export function Navbar() {
                   </div>
                 ) : (
                   <div className="flex flex-col gap-3">
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       asChild
-                      className="text-muted-foreground hover:text-foreground hover:bg-primary/10"
+                      className="text-muted-foreground hover:text-foreground hover:bg-primary/10 justify-center"
                       onClick={() => setIsMenuOpen(false)}
                     >
                       <Link href="/login">Login</Link>
                     </Button>
-                    <Button 
-                      size="sm" 
+                    <Button
+                      size="sm"
                       asChild
-                      className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white border-0"
+                      className="bg-gradient-to-r from-brand-500 via-purple-500 to-brand-600 hover:shadow-glow text-white border-0 justify-center"
                       onClick={() => setIsMenuOpen(false)}
                     >
                       <Link href="/register">Register</Link>
                     </Button>
                   </div>
                 )}
-                
+
                 {/* Mobile Theme Toggle */}
-                <div className="flex justify-center mt-4">
+                <div className="flex justify-center mt-4 pt-4 border-t border-border/50">
                   <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                    <span>Toggle theme:</span>
+                    <span>Theme:</span>
                     <ThemeToggle />
                   </div>
                 </div>

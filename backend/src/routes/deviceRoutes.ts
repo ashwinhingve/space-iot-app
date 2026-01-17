@@ -11,14 +11,12 @@ import {
 
 const router = express.Router();
 
-// Apply auth middleware to all routes
-router.use(auth);
-
-router.post('/', createDevice);
-router.get('/', getDevices);
-router.get('/:id', getDevice);
-router.put('/:id', updateDevice);
-router.delete('/:id', deleteDevice);
-router.post('/:id/control', controlDevice);
+// All routes require authentication
+router.get('/', auth, getDevices);
+router.get('/:id', auth, getDevice);
+router.post('/', auth, createDevice);
+router.put('/:id', auth, updateDevice);
+router.delete('/:id', auth, deleteDevice);
+router.post('/:id/control', auth, controlDevice);
 
 export default router; 

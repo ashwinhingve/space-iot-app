@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
-import { io } from 'socket.io-client';
+import { io, Socket } from 'socket.io-client';
 import { SOCKET_CONFIG } from '@/lib/config';
 
 // Sample Chart Implementation (can be replaced with actual Recharts implementation)
@@ -325,14 +325,17 @@ export const Dashboard: React.FC = () => {
         );
         
       case 'slider':
+        const sliderValue = typeof widget.value === 'number' && !isNaN(widget.value)
+          ? widget.value
+          : (widget.config.min || 0);
         return (
           <div className="pt-2">
             <div className="flex justify-between items-center mb-2">
               <span className="text-sm text-muted-foreground">{widget.config.label || 'Value'}</span>
-              <Badge>{widget.value}</Badge>
+              <Badge>{sliderValue}</Badge>
             </div>
             <Slider
-              value={[widget.value as number]}
+              value={[sliderValue]}
               min={widget.config.min || 0}
               max={widget.config.max || 100}
               step={widget.config.step || 1}
@@ -342,10 +345,13 @@ export const Dashboard: React.FC = () => {
         );
         
       case 'gauge':
+        const gaugeValue = typeof widget.value === 'number' && !isNaN(widget.value)
+          ? widget.value
+          : (widget.config.min || 0);
         return (
           <div className="pt-2">
-            <Gauge 
-              value={widget.value as number}
+            <Gauge
+              value={gaugeValue}
               min={widget.config.min}
               max={widget.config.max}
               label={widget.config.label}
@@ -463,7 +469,7 @@ export const Dashboard: React.FC = () => {
   return (
     <div className="p-4">
       <DragDropContext onDragEnd={onDragEnd}>
-        <Droppable droppableId="DASHBOARD" direction="horizontal">
+        <Droppable droppableId="DASHBOARD" direction="horizontal" isDropDisabled={false} isCombineEnabled={false} ignoreContainerClipping={false}>
           {(provided) => (
             <div 
               ref={provided.innerRef} 

@@ -7,8 +7,9 @@ import { Button } from '@/components/ui/button';
 import { createDevice, fetchDevices, deleteDevice } from '@/store/slices/deviceSlice';
 import { RootState } from '@/store/store';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, X, Smartphone, Settings, PieChart, ToggleLeft, SlidersHorizontal } from 'lucide-react';
+import { Plus, X, Smartphone } from 'lucide-react';
 import { AppDispatch } from '@/store/store';
+import { ModernDeviceCard } from '@/components/ModernDeviceCard';
 
 type DeviceType = {
   _id: string;
@@ -20,13 +21,14 @@ type DeviceType = {
     timestamp: string;
     value: number;
   };
-};
-
-const deviceTypeIcons = {
-  switch: <ToggleLeft className="h-5 w-5" />,
-  slider: <SlidersHorizontal className="h-5 w-5" />,
-  sensor: <Settings className="h-5 w-5" />,
-  chart: <PieChart className="h-5 w-5" />,
+  settings?: {
+    temperature?: number;
+    humidity?: number;
+    value?: number;
+    fanSpeed?: number;
+    dataLogging?: boolean;
+    valves?: { v1: boolean; v2: boolean; v3: boolean; v4: boolean };
+  };
 };
 
 export default function DevicesPage() {
@@ -36,7 +38,7 @@ export default function DevicesPage() {
     type: 'switch',
     mqttTopic: '',
   });
-  
+
   const dispatch = useDispatch<AppDispatch>();
   const { devices = [], loading } = useSelector((state: RootState) => state.devices);
 
@@ -67,20 +69,19 @@ export default function DevicesPage() {
 
   return (
     <MainLayout showFooter={false}>
-      <div className="container py-10">
-        <motion.div 
-          className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-12"
+      <div className="devices-page-container">
+        {/* Page Header */}
+        <motion.div
+          className="devices-header"
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
         >
-          <div>
-            <h1 className="text-3xl font-bold">Devices</h1>
-            <p className="text-muted-foreground mt-1">
-              Manage your IoT devices
-            </p>
-          </div>
-          <Button onClick={() => setShowAddDevice(true)} className="flex items-center gap-2">
+          <h1 className="devices-title">My Devices</h1>
+          <Button
+            onClick={() => setShowAddDevice(true)}
+            className="add-device-btn"
+          >
             <Plus className="h-4 w-4" />
             Add Device
           </Button>
@@ -89,35 +90,40 @@ export default function DevicesPage() {
         {/* Add Device Modal */}
         <AnimatePresence>
           {showAddDevice && (
-            <motion.div 
-              className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+            <motion.div
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setShowAddDevice(false)}
             >
-              <motion.div 
-                className="bg-card p-6 rounded-lg w-full max-w-md shadow-xl"
-                initial={{ scale: 0.95, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.95, opacity: 0 }}
+              <motion.div
+                className="add-device-modal"
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                transition={{ type: 'spring', duration: 0.5 }}
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-xl font-bold">Add New Device</h2>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
+                <div className="flex justify-between items-center mb-8">
+                  <div>
+                    <h2 className="text-2xl font-bold text-white">Add New Device</h2>
+                    <p className="text-sm text-gray-400 mt-1">Connect your IoT device to the platform</p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="hover:bg-red-500/10 hover:text-red-400"
                     onClick={() => setShowAddDevice(false)}
                   >
-                    <X className="h-4 w-4" />
+                    <X className="h-5 w-5" />
                   </Button>
                 </div>
-                
+
                 <form onSubmit={handleSubmit} className="space-y-6">
-                  <div className="space-y-4">
+                  <div className="space-y-5">
                     <div>
-                      <label className="block text-sm font-medium mb-1">
+                      <label className="block text-sm font-semibold mb-2 text-gray-300">
                         Device Name
                       </label>
                       <input
@@ -126,13 +132,13 @@ export default function DevicesPage() {
                         onChange={(e) =>
                           setNewDevice({ ...newDevice, name: e.target.value })
                         }
-                        className="w-full px-3 py-2 border rounded-md bg-background"
-                        placeholder="My ESP32 Device"
+                        className="modal-input"
+                        placeholder="ESP32-001: Smart Plug"
                         required
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium mb-1">
+                      <label className="block text-sm font-semibold mb-2 text-gray-300">
                         Device Type
                       </label>
                       <select
@@ -140,7 +146,7 @@ export default function DevicesPage() {
                         onChange={(e) =>
                           setNewDevice({ ...newDevice, type: e.target.value })
                         }
-                        className="w-full px-3 py-2 border rounded-md bg-background"
+                        className="modal-input"
                       >
                         <option value="switch">Switch</option>
                         <option value="slider">Slider</option>
@@ -149,7 +155,7 @@ export default function DevicesPage() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium mb-1">
+                      <label className="block text-sm font-semibold mb-2 text-gray-300">
                         MQTT Topic
                       </label>
                       <input
@@ -158,30 +164,38 @@ export default function DevicesPage() {
                         onChange={(e) =>
                           setNewDevice({ ...newDevice, mqttTopic: e.target.value })
                         }
-                        className="w-full px-3 py-2 border rounded-md font-mono text-sm bg-background"
-                        placeholder="devices/esp32-01"
+                        className="modal-input font-mono text-sm"
+                        placeholder="devices/esp32-001"
                         required
                       />
-                      <div className="mt-2 p-3 bg-muted/50 rounded text-xs">
-                        <p className="font-medium mb-1">Important: MQTT Topic Format</p>
-                        <p className="mb-1">Match exactly what&apos;s in your ESP32 code:</p>
-                        <ul className="list-disc pl-4 space-y-1">
-                          <li>If your ESP32 deviceId is <code>esp32-01</code>, use <code>devices/esp32-01</code></li>
+                      <div className="mt-3 p-4 bg-purple-500/10 border border-purple-500/20 rounded-xl text-xs">
+                        <p className="font-semibold mb-2 flex items-center gap-2 text-purple-300">
+                          <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
+                          MQTT Topic Format
+                        </p>
+                        <p className="mb-2 text-gray-400">Match exactly what&apos;s in your ESP32 code:</p>
+                        <ul className="list-disc pl-4 space-y-1 text-gray-400">
+                          <li>If your ESP32 deviceId is <code className="px-1.5 py-0.5 bg-black/30 rounded text-purple-300">esp32-001</code>, use <code className="px-1.5 py-0.5 bg-black/30 rounded text-purple-300">devices/esp32-001</code></li>
                           <li>Must match the base topic defined in your ESP32 code</li>
-                          <li>Do not add <code>/data</code> or <code>/online</code> suffixes</li>
+                          <li>Do not add <code className="px-1.5 py-0.5 bg-black/30 rounded">/data</code> or <code className="px-1.5 py-0.5 bg-black/30 rounded">/online</code> suffixes</li>
                         </ul>
                       </div>
                     </div>
                   </div>
-                  <div className="flex justify-end gap-2">
+                  <div className="flex justify-end gap-3 pt-4">
                     <Button
                       type="button"
                       variant="outline"
                       onClick={() => setShowAddDevice(false)}
+                      className="px-6 border-gray-600 text-gray-300 hover:bg-gray-800"
                     >
                       Cancel
                     </Button>
-                    <Button type="submit" disabled={loading}>
+                    <Button
+                      type="submit"
+                      disabled={loading}
+                      className="modal-submit-btn px-6"
+                    >
                       {loading ? 'Adding...' : 'Add Device'}
                     </Button>
                   </div>
@@ -191,84 +205,52 @@ export default function DevicesPage() {
           )}
         </AnimatePresence>
 
+        {/* Loading State */}
         {loading ? (
           <div className="flex items-center justify-center h-64">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <div className="loading-spinner"></div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {devices.map((device: DeviceType) => (
+          /* Device Cards Grid */
+          <div className="devices-grid">
+            {devices.map((device: DeviceType, index: number) => (
               <motion.div
                 key={device._id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3 }}
-                className="bg-card p-6 rounded-lg shadow-sm border"
+                transition={{ duration: 0.3, delay: index * 0.1 }}
               >
-                <div className="flex justify-between items-start">
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-primary/10 text-primary">
-                      <Smartphone className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h3 className="font-medium">{device.name}</h3>
-                      <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                        {deviceTypeIcons[device.type as keyof typeof deviceTypeIcons]}
-                        <span>{device.type}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <span
-                    className={`px-2 py-1 rounded-full text-xs ${
-                      device.status === 'online'
-                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-                        : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
-                    }`}
-                  >
-                    {device.status}
-                  </span>
-                </div>
-                
-                <div className="mt-6 text-sm">
-                  <p className="text-muted-foreground mb-1">MQTT Topic:</p>
-                  <p className="font-mono text-xs bg-muted/50 p-2 rounded">{device.mqttTopic}</p>
-                </div>
-                
-                <div className="mt-6 flex justify-end gap-2">
-                  <Button variant="outline" size="sm">
-                    Edit
-                  </Button>
-                  <Button 
-                    variant="destructive" 
-                    size="sm"
-                    onClick={() => handleDelete(device._id)}
-                  >
-                    Delete
-                  </Button>
-                </div>
+                <ModernDeviceCard device={device} />
               </motion.div>
             ))}
           </div>
         )}
 
+        {/* Empty State */}
         {!loading && devices.length === 0 && (
-          <motion.div 
-            className="text-center py-16 bg-muted/30 rounded-lg border border-dashed"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+          <motion.div
+            className="empty-state-modern"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
           >
-            <h3 className="text-lg font-medium mb-2">No devices found</h3>
-            <p className="text-muted-foreground mb-6">
-              Add your first device to get started
+            <div className="empty-state-icon">
+              <Smartphone className="h-10 w-10 text-purple-400" />
+            </div>
+            <h3 className="text-2xl font-bold mb-3 text-white">No Devices Yet</h3>
+            <p className="text-gray-400 mb-8 max-w-md mx-auto">
+              Connect your first IoT device to start monitoring and controlling it from anywhere
             </p>
-            <Button onClick={() => setShowAddDevice(true)}>
+            <Button
+              onClick={() => setShowAddDevice(true)}
+              className="add-first-device-btn"
+            >
               <Plus className="h-4 w-4 mr-2" />
-              Add Device
+              Add Your First Device
             </Button>
           </motion.div>
         )}
       </div>
     </MainLayout>
   );
-} 
+}

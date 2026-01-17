@@ -7,12 +7,11 @@ const express_1 = __importDefault(require("express"));
 const auth_1 = require("../middleware/auth");
 const deviceController_1 = require("../controllers/deviceController");
 const router = express_1.default.Router();
-// Apply auth middleware to all routes
-router.use(auth_1.auth);
-router.post('/', deviceController_1.createDevice);
-router.get('/', deviceController_1.getDevices);
-router.get('/:id', deviceController_1.getDevice);
-router.put('/:id', deviceController_1.updateDevice);
-router.delete('/:id', deviceController_1.deleteDevice);
-router.post('/:id/control', deviceController_1.controlDevice);
+// All routes require authentication
+router.get('/', auth_1.auth, deviceController_1.getDevices);
+router.get('/:id', auth_1.auth, deviceController_1.getDevice);
+router.post('/', auth_1.auth, deviceController_1.createDevice);
+router.put('/:id', auth_1.auth, deviceController_1.updateDevice);
+router.delete('/:id', auth_1.auth, deviceController_1.deleteDevice);
+router.post('/:id/control', auth_1.auth, deviceController_1.controlDevice);
 exports.default = router;

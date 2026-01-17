@@ -25,7 +25,9 @@ const userSchema = new mongoose_1.default.Schema({
     },
     password: {
         type: String,
-        required: true,
+        required: function () {
+            return this.authProvider === 'local';
+        },
         minlength: 6
     },
     name: {
@@ -33,15 +35,26 @@ const userSchema = new mongoose_1.default.Schema({
         required: true,
         trim: true
     },
-    createdAt: {
-        type: Date,
-        default: Date.now
+    googleId: {
+        type: String,
+        unique: true,
+        sparse: true
+    },
+    avatar: {
+        type: String
+    },
+    authProvider: {
+        type: String,
+        enum: ['local', 'google'],
+        default: 'local'
     }
+}, {
+    timestamps: true
 });
-// Hash password before saving
+// Hash password before saving (only for local auth)
 userSchema.pre('save', function (next) {
     return __awaiter(this, void 0, void 0, function* () {
-        if (!this.isModified('password'))
+        if (!this.isModified('password') || !this.password)
             return next();
         try {
             const salt = yield bcryptjs_1.default.genSalt(10);
@@ -56,7 +69,17 @@ userSchema.pre('save', function (next) {
 // Method to compare password
 userSchema.methods.comparePassword = function (candidatePassword) {
     return __awaiter(this, void 0, void 0, function* () {
+        if (!this.password) {
+            return false;
+        }
         return bcryptjs_1.default.compare(candidatePassword, this.password);
     });
+};
+// Remove password from JSON responses
+userSchema.methods.toJSON = function () {
+    const obj = this.toObject();
+    delete obj.password;
+    delete obj.__v;
+    return obj;
 };
 exports.User = mongoose_1.default.model('User', userSchema);
