@@ -161,7 +161,7 @@ export default function ManifoldDetailPage() {
 
   if (loading || !selectedManifold) {
     return (
-      <MainLayout showFooter={false}>
+      <MainLayout>
         <div className="relative min-h-screen">
           <AnimatedBackground variant="subtle" showParticles={false} />
           <div className="relative z-10 flex flex-col items-center justify-center h-screen gap-4">
@@ -218,7 +218,7 @@ export default function ManifoldDetailPage() {
   ];
 
   return (
-    <MainLayout showFooter={false}>
+    <MainLayout>
       <div className="relative min-h-screen">
         {/* Animated Background */}
         <AnimatedBackground variant="subtle" showParticles={true} showGradientOrbs={true} />

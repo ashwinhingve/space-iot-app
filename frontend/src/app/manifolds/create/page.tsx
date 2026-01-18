@@ -110,7 +110,7 @@ export default function CreateManifoldPage() {
   };
 
   return (
-    <MainLayout showFooter={false}>
+    <MainLayout>
       <div className="container py-10 max-w-4xl">
         <Button
           variant="ghost"

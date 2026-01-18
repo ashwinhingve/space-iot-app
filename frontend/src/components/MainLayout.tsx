@@ -7,16 +7,22 @@ import { Footer } from '@/components/Footer'
 interface MainLayoutProps {
   children: ReactNode
   showFooter?: boolean
+  /** Add padding for fixed navbar - set to false for full-screen hero sections */
+  padNavbar?: boolean
 }
 
-export function MainLayout({ children, showFooter = true }: MainLayoutProps) {
+export function MainLayout({
+  children,
+  showFooter = true,
+  padNavbar = true
+}: MainLayoutProps) {
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col bg-background">
       <Navbar />
-      <div className="flex-1 pt-16">
+      <main className={`flex-1 ${padNavbar ? 'pt-16 md:pt-20' : ''}`}>
         {children}
-      </div>
+      </main>
       {showFooter && <Footer />}
     </div>
   )
-} 
+}

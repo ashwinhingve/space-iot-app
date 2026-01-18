@@ -148,12 +148,12 @@ export default function DashboardPage() {
   };
 
   return (
-    <MainLayout showFooter={false}>
+    <MainLayout>
       <div className="relative min-h-screen">
         {/* Animated Background */}
         <AnimatedBackground variant="subtle" showParticles={true} showGradientOrbs={true} />
 
-        <div className="relative z-10 container mx-auto px-4 py-6 max-w-7xl">
+        <div className="relative z-10 container mx-auto px-4 py-6 md:py-8 max-w-7xl">
           {/* Header */}
           <motion.div
             initial={{ opacity: 0, y: -20 }}

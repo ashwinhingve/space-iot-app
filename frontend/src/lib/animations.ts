@@ -1,8 +1,8 @@
 import { Variants } from 'framer-motion';
 
-// Shared transition for performance
-const smoothTransition = { duration: 0.3, ease: [0.16, 1, 0.3, 1] };
-const springTransition = { type: "spring", stiffness: 260, damping: 20 };
+// Shared transition for performance - using as const for proper typing
+const smoothTransition = { duration: 0.3, ease: [0.16, 1, 0.3, 1] as const };
+const springTransition = { type: "spring" as const, stiffness: 260, damping: 20 };
 
 // Fade in animation variants
 export const fadeIn: Variants = {

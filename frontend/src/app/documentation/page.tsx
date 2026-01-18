@@ -497,7 +497,7 @@ export default function DocumentationPage() {
       <div className="relative min-h-screen">
         <AnimatedBackground variant="subtle" showParticles={true} showGradientOrbs={true} />
 
-        <div className="relative z-10 container mx-auto py-10 px-4">
+        <div className="relative z-10 container mx-auto py-6 md:py-8 px-4">
           {/* Header */}
           <motion.div
             className="mb-10"

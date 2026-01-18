@@ -98,12 +98,12 @@ export default function ManifoldsPage() {
   };
 
   return (
-    <MainLayout showFooter={false}>
+    <MainLayout>
       <div className="relative min-h-screen">
         {/* Animated Background */}
         <AnimatedBackground variant="subtle" showParticles={true} showGradientOrbs={true} />
 
-        <div className="container relative z-10 py-10">
+        <div className="container relative z-10 px-4 py-6 md:py-8">
           <motion.div
             className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8"
             initial={{ opacity: 0, y: -20 }}

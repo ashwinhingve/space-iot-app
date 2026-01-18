@@ -98,15 +98,17 @@ const initialState: DashboardState = {
 };
 
 // Helper to get auth token
-const getAuthHeaders = () => {
+const getAuthHeaders = (): Record<string, string> => {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
   if (typeof window !== 'undefined') {
     const token = localStorage.getItem('token');
-    return {
-      'Content-Type': 'application/json',
-      Authorization: token ? `Bearer ${token}` : '',
-    };
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
   }
-  return { 'Content-Type': 'application/json' };
+  return headers;
 };
 
 // Thunks
