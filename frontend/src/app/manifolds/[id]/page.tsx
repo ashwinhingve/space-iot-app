@@ -8,6 +8,7 @@ import { MainLayout } from '@/components/MainLayout';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import AnimatedBackground from '@/components/AnimatedBackground';
 import {
   fetchManifoldDetail,
   sendValveCommand,
@@ -26,7 +27,6 @@ import {
   Gauge,
   Droplet,
   AlertTriangle,
-  CheckCircle,
   Settings,
   Wifi,
   WifiOff,
@@ -34,11 +34,11 @@ import {
   Box,
   LayoutDashboard,
   Loader2,
+  Sparkles,
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import { SOCKET_CONFIG } from '@/lib/config';
 
-// Dynamically load 3D viewer with SSR disabled
 const Manifold3DViewer = dynamic(
   () => import('@/components/Manifold3DViewer'),
   {
@@ -162,8 +162,27 @@ export default function ManifoldDetailPage() {
   if (loading || !selectedManifold) {
     return (
       <MainLayout showFooter={false}>
-        <div className="flex items-center justify-center h-screen">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        <div className="relative min-h-screen">
+          <AnimatedBackground variant="subtle" showParticles={false} />
+          <div className="relative z-10 flex flex-col items-center justify-center h-screen gap-4">
+            <div className="relative">
+              <div className="absolute inset-0 bg-gradient-to-r from-brand-500 to-purple-500 rounded-full blur-xl opacity-40 animate-pulse" />
+              <motion.div
+                className="relative"
+                animate={{ rotate: 360 }}
+                transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+              >
+                <div className="h-14 w-14 rounded-full border-2 border-transparent border-t-brand-500 border-r-purple-500" />
+              </motion.div>
+            </div>
+            <motion.p
+              className="text-muted-foreground text-sm"
+              animate={{ opacity: [0.5, 1, 0.5] }}
+              transition={{ duration: 1.5, repeat: Infinity }}
+            >
+              Loading manifold details...
+            </motion.p>
+          </div>
         </div>
       </MainLayout>
     );
@@ -200,83 +219,121 @@ export default function ManifoldDetailPage() {
 
   return (
     <MainLayout showFooter={false}>
-      <div className="container py-6">
-        {/* Header */}
-        <motion.div
-          className="mb-6"
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          <Button
-            variant="ghost"
-            onClick={() => router.push('/manifolds')}
-            className="mb-4 hover:bg-secondary"
+      <div className="relative min-h-screen">
+        {/* Animated Background */}
+        <AnimatedBackground variant="subtle" showParticles={true} showGradientOrbs={true} />
+
+        <div className="container relative z-10 py-6">
+          {/* Header */}
+          <motion.div
+            className="mb-6"
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
           >
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Manifolds
-          </Button>
-
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-              <h1 className="text-3xl font-bold mb-2">{selectedManifold.name}</h1>
-              <p className="text-muted-foreground font-mono text-sm">
-                {selectedManifold.manifoldId}
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <Badge
-                variant={isOnline ? 'default' : 'secondary'}
-                className={`flex items-center gap-2 px-4 py-2 ${
-                  isOnline ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-slate-500'
-                }`}
-              >
-                {isOnline ? (
-                  <Wifi className="h-4 w-4" />
-                ) : (
-                  <WifiOff className="h-4 w-4" />
-                )}
-                {isOnline ? 'Online' : 'Offline'}
-              </Badge>
-              <Badge
-                variant={
-                  selectedManifold.status === 'Active' ? 'default' : 'secondary'
-                }
-                className={
-                  selectedManifold.status === 'Active'
-                    ? 'bg-emerald-500 hover:bg-emerald-600'
-                    : selectedManifold.status === 'Fault'
-                    ? 'bg-red-500 hover:bg-red-600'
-                    : ''
-                }
-              >
-                {selectedManifold.status}
-              </Badge>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* Tab Navigation */}
-        <motion.div
-          className="flex gap-2 mb-6"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.1 }}
-        >
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
-                activeTab === tab.id
-                  ? 'bg-gradient-to-r from-brand-500 to-purple-500 text-white shadow-md'
-                  : 'bg-secondary/50 hover:bg-secondary border border-border/50'
-              }`}
+            <motion.div
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.1 }}
             >
-              <tab.icon className="h-4 w-4" />
-              {tab.label}
-            </button>
-          ))}
-        </motion.div>
+              <Button
+                variant="ghost"
+                onClick={() => router.push('/manifolds')}
+                className="mb-4 hover:bg-secondary/80 group"
+              >
+                <ArrowLeft className="h-4 w-4 mr-2 transition-transform group-hover:-translate-x-1" />
+                Back to Manifolds
+              </Button>
+            </motion.div>
+
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15 }}
+              >
+                <h1 className="text-3xl font-bold mb-2 bg-clip-text text-transparent bg-gradient-to-r from-foreground via-foreground to-muted-foreground">
+                  {selectedManifold.name}
+                </h1>
+                <p className="text-muted-foreground font-mono text-sm flex items-center gap-2">
+                  <span className="inline-block w-2 h-2 rounded-full bg-brand-500 animate-pulse" />
+                  {selectedManifold.manifoldId}
+                </p>
+              </motion.div>
+
+              <motion.div
+                className="flex items-center gap-3"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.2 }}
+              >
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Badge
+                    variant={isOnline ? 'default' : 'secondary'}
+                    className={`flex items-center gap-2 px-4 py-2 transition-all duration-300 ${
+                      isOnline
+                        ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 hover:shadow-lg hover:shadow-emerald-500/30'
+                        : 'bg-slate-500'
+                    }`}
+                  >
+                    {isOnline ? (
+                      <Wifi className="h-4 w-4" />
+                    ) : (
+                      <WifiOff className="h-4 w-4" />
+                    )}
+                    {isOnline ? 'Online' : 'Offline'}
+                  </Badge>
+                </motion.div>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Badge
+                    variant={
+                      selectedManifold.status === 'Active' ? 'default' : 'secondary'
+                    }
+                    className={`transition-all duration-300 ${
+                      selectedManifold.status === 'Active'
+                        ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 hover:shadow-lg hover:shadow-emerald-500/30'
+                        : selectedManifold.status === 'Fault'
+                        ? 'bg-gradient-to-r from-red-500 to-red-600 hover:shadow-lg hover:shadow-red-500/30'
+                        : ''
+                    }`}
+                  >
+                    {selectedManifold.status}
+                  </Badge>
+                </motion.div>
+              </motion.div>
+            </div>
+          </motion.div>
+
+          {/* Tab Navigation */}
+          <motion.div
+            className="flex gap-2 mb-6"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25 }}
+          >
+            {tabs.map((tab, index) => (
+              <motion.button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 backdrop-blur-sm ${
+                  activeTab === tab.id
+                    ? 'bg-gradient-to-r from-brand-500 to-purple-500 text-white shadow-lg shadow-brand-500/25'
+                    : 'bg-secondary/50 hover:bg-secondary/80 border border-border/50 hover:border-brand-500/30'
+                }`}
+                whileHover={{ scale: 1.02, y: -1 }}
+                whileTap={{ scale: 0.98 }}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 + index * 0.05 }}
+              >
+                <tab.icon className="h-4 w-4" />
+                {tab.label}
+                {activeTab === tab.id && (
+                  <Sparkles className="h-3 w-3 ml-1 opacity-70" />
+                )}
+              </motion.button>
+            ))}
+          </motion.div>
 
         {/* Tab Content */}
         <AnimatePresence mode="wait">
@@ -624,26 +681,26 @@ export default function ManifoldDetailPage() {
               </div>
 
               {/* Interactive Instructions */}
-              <Card className="p-4 mt-4 bg-secondary/30">
-                <h4 className="font-semibold mb-2 flex items-center gap-2">
-                  <Eye className="h-4 w-4" />
+              <Card className="p-4 mt-4 bg-secondary/30 backdrop-blur-sm border-border/50 hover:border-brand-500/20 transition-colors">
+                <h4 className="font-semibold mb-3 flex items-center gap-2">
+                  <Eye className="h-4 w-4 text-brand-500" />
                   Interactive Controls
                 </h4>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-muted-foreground">
-                  <div className="flex items-center gap-2">
-                    <kbd className="px-2 py-1 bg-background rounded text-xs">Drag</kbd>
+                  <div className="flex items-center gap-2 group/kbd">
+                    <kbd className="px-2.5 py-1.5 bg-background/80 rounded-md text-xs font-mono border border-border/50 group-hover/kbd:border-brand-500/30 transition-colors">Drag</kbd>
                     <span>Rotate view</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <kbd className="px-2 py-1 bg-background rounded text-xs">Scroll</kbd>
+                  <div className="flex items-center gap-2 group/kbd">
+                    <kbd className="px-2.5 py-1.5 bg-background/80 rounded-md text-xs font-mono border border-border/50 group-hover/kbd:border-brand-500/30 transition-colors">Scroll</kbd>
                     <span>Zoom in/out</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <kbd className="px-2 py-1 bg-background rounded text-xs">Right-drag</kbd>
+                  <div className="flex items-center gap-2 group/kbd">
+                    <kbd className="px-2.5 py-1.5 bg-background/80 rounded-md text-xs font-mono border border-border/50 group-hover/kbd:border-brand-500/30 transition-colors">Right-drag</kbd>
                     <span>Pan view</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <kbd className="px-2 py-1 bg-background rounded text-xs">Click valve</kbd>
+                  <div className="flex items-center gap-2 group/kbd">
+                    <kbd className="px-2.5 py-1.5 bg-background/80 rounded-md text-xs font-mono border border-border/50 group-hover/kbd:border-brand-500/30 transition-colors">Click valve</kbd>
                     <span>Toggle state</span>
                   </div>
                 </div>
@@ -651,6 +708,7 @@ export default function ManifoldDetailPage() {
             </motion.div>
           )}
         </AnimatePresence>
+        </div>
       </div>
     </MainLayout>
   );

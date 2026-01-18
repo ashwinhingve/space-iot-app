@@ -3,6 +3,9 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
 
+  // Transpile React Three Fiber packages for proper bundling
+  transpilePackages: ['three', '@react-three/fiber', '@react-three/drei'],
+
   // Fast refresh settings
   onDemandEntries: {
     maxInactiveAge: 25 * 1000,
@@ -29,4 +32,4 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig; 
+module.exports = nextConfig;

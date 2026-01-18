@@ -10,7 +10,8 @@ import { GoogleAuthButton } from '@/components/GoogleAuthButton';
 import { PasswordStrength } from '@/components/PasswordStrength';
 import { RootState, AppDispatch } from '@/store/store';
 import { motion } from 'framer-motion';
-import { ArrowRight, Lock, Mail, User, AlertCircle } from 'lucide-react';
+import AnimatedBackground from '@/components/AnimatedBackground';
+import { ArrowRight, Lock, Mail, User, AlertCircle, Sparkles, Zap, Rocket } from 'lucide-react';
 
 export default function RegisterPage() {
   const [name, setName] = useState('');
@@ -18,17 +19,16 @@ export default function RegisterPage() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [validationError, setValidationError] = useState('');
+  const [focusedField, setFocusedField] = useState<string | null>(null);
 
   const dispatch = useDispatch<AppDispatch>();
   const router = useRouter();
   const { loading, error, isAuthenticated } = useSelector((state: RootState) => state.auth);
 
-  // Clear error when component mounts
   useEffect(() => {
     dispatch(clearError());
   }, [dispatch]);
 
-  // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated) {
       router.push('/dashboard');
@@ -40,7 +40,6 @@ export default function RegisterPage() {
     dispatch(clearError());
     setValidationError('');
 
-    // Validation
     if (name.trim().length < 2) {
       setValidationError('Name must be at least 2 characters long');
       return;
@@ -51,7 +50,6 @@ export default function RegisterPage() {
       return;
     }
 
-    // Password strength validation
     const hasUpperCase = /[A-Z]/.test(password);
     const hasLowerCase = /[a-z]/.test(password);
     const hasNumber = /[0-9]/.test(password);
@@ -74,179 +72,288 @@ export default function RegisterPage() {
     }
   };
 
+  const InputField = ({
+    id,
+    label,
+    type,
+    value,
+    onChange,
+    placeholder,
+    icon: Icon,
+    autoComplete,
+    delay = 0,
+    children
+  }: {
+    id: string;
+    label: string;
+    type: string;
+    value: string;
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    placeholder: string;
+    icon: any;
+    autoComplete?: string;
+    delay?: number;
+    children?: React.ReactNode;
+  }) => (
+    <motion.div
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay }}
+    >
+      <label htmlFor={id} className="block text-sm font-medium mb-2">
+        {label}
+      </label>
+      <div className={`relative group transition-all duration-300 ${focusedField === id ? 'scale-[1.01]' : ''}`}>
+        <div className={`absolute inset-0 rounded-xl bg-gradient-to-r from-brand-500/20 to-purple-500/20 blur-xl opacity-0 transition-opacity duration-300 ${focusedField === id ? 'opacity-100' : 'group-hover:opacity-50'}`} />
+        <div className="relative">
+          <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+            <Icon className={`h-5 w-5 transition-colors duration-300 ${focusedField === id ? 'text-brand-500' : 'text-muted-foreground'}`} />
+          </div>
+          <input
+            id={id}
+            name={id}
+            type={type}
+            required
+            autoComplete={autoComplete}
+            className="pl-11 w-full px-4 py-3 border border-border/50 rounded-xl bg-background/50 backdrop-blur-sm focus:border-brand-500/50 focus:ring-2 focus:ring-brand-500/20 transition-all duration-300 outline-none"
+            placeholder={placeholder}
+            value={value}
+            onChange={onChange}
+            onFocus={() => setFocusedField(id)}
+            onBlur={() => setFocusedField(null)}
+          />
+        </div>
+      </div>
+      {children}
+    </motion.div>
+  );
+
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="w-full py-4 px-6">
-        <Link href="/" className="inline-block">
-          <span className="font-bold text-xl inline-block bg-gradient-to-r from-primary to-blue-600 bg-clip-text text-transparent">
+    <div className="min-h-screen flex flex-col relative overflow-hidden">
+      {/* Animated Background */}
+      <AnimatedBackground variant="subtle" showParticles={true} showGradientOrbs={true} />
+
+      {/* Header */}
+      <motion.header
+        className="relative z-10 w-full py-6 px-6"
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+      >
+        <Link href="/" className="inline-flex items-center gap-2 group">
+          <div className="relative">
+            <div className="absolute inset-0 bg-gradient-to-br from-brand-500 to-purple-500 rounded-lg blur-md opacity-40 group-hover:opacity-60 transition-opacity" />
+            <div className="relative p-1.5 bg-gradient-to-br from-brand-500/10 to-purple-500/10 rounded-lg border border-brand-500/20">
+              <Zap className="h-5 w-5 text-brand-500" />
+            </div>
+          </div>
+          <span className="font-bold text-xl bg-gradient-to-r from-brand-500 via-purple-500 to-brand-600 bg-clip-text text-transparent">
             IoT Space
           </span>
         </Link>
-      </header>
+      </motion.header>
 
-      <div className="flex-1 flex items-center justify-center p-6">
+      {/* Main Content */}
+      <div className="relative z-10 flex-1 flex items-center justify-center p-6 py-12">
         <motion.div
-          className="w-full max-w-md space-y-8"
-          initial={{ opacity: 0, y: 20 }}
+          className="w-full max-w-md space-y-6"
+          initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
+          transition={{ duration: 0.6, delay: 0.1 }}
         >
+          {/* Welcome Text */}
           <div className="text-center">
-            <h1 className="text-3xl font-bold">Create an account</h1>
-            <p className="mt-3 text-muted-foreground">
-              Sign up to get started with IoT Space
-            </p>
+            <motion.div
+              className="inline-flex items-center gap-2 px-4 py-2 mb-6 rounded-full bg-brand-500/10 border border-brand-500/20 backdrop-blur-sm"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.2 }}
+            >
+              <Rocket className="h-4 w-4 text-brand-500" />
+              <span className="text-sm font-medium text-brand-600 dark:text-brand-400">Get Started Free</span>
+            </motion.div>
+            <motion.h1
+              className="text-3xl md:text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-foreground via-foreground to-muted-foreground"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3 }}
+            >
+              Create your account
+            </motion.h1>
+            <motion.p
+              className="mt-3 text-muted-foreground"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.4 }}
+            >
+              Start building your IoT projects today
+            </motion.p>
           </div>
 
-          <div className="bg-card p-8 border rounded-lg shadow-sm">
-            {/* Google Sign-Up Button */}
-            <div className="mb-6">
-              <GoogleAuthButton
-                onError={(err) => console.error(err)}
-              />
-            </div>
+          {/* Register Card */}
+          <motion.div
+            className="relative overflow-hidden bg-card/80 backdrop-blur-xl p-8 border border-border/50 rounded-2xl shadow-xl"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+          >
+            {/* Gradient border effect */}
+            <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-brand-500/10 via-transparent to-purple-500/10 pointer-events-none" />
 
-            <div className="relative my-6">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t"></div>
+            <div className="relative">
+              {/* Google Sign-Up Button */}
+              <div className="mb-6">
+                <GoogleAuthButton onError={(err) => console.error(err)} />
               </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-card text-muted-foreground">
-                  Or continue with email
-                </span>
-              </div>
-            </div>
 
-            {/* Email/Password Registration Form */}
-            <form className="space-y-6" onSubmit={handleSubmit}>
-              <div className="space-y-4">
-                <div>
-                  <label htmlFor="name" className="block text-sm font-medium mb-1">
-                    Full Name
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <User className="h-5 w-5 text-muted-foreground" />
-                    </div>
-                    <input
-                      id="name"
-                      name="name"
-                      type="text"
-                      required
-                      className="pl-10 w-full px-3 py-2 border rounded-md bg-background"
-                      placeholder="John Doe"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                    />
-                  </div>
+              {/* Divider */}
+              <div className="relative my-6">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-border/50"></div>
                 </div>
-
-                <div>
-                  <label htmlFor="email" className="block text-sm font-medium mb-1">
-                    Email address
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Mail className="h-5 w-5 text-muted-foreground" />
-                    </div>
-                    <input
-                      id="email"
-                      name="email"
-                      type="email"
-                      required
-                      autoComplete="username"
-                      className="pl-10 w-full px-3 py-2 border rounded-md bg-background"
-                      placeholder="you@example.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label htmlFor="password" className="block text-sm font-medium mb-1">
-                    Password
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Lock className="h-5 w-5 text-muted-foreground" />
-                    </div>
-                    <input
-                      id="password"
-                      name="password"
-                      type="password"
-                      required
-                      autoComplete="new-password"
-                      className="pl-10 w-full px-3 py-2 border rounded-md bg-background"
-                      placeholder="••••••••"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                    />
-                  </div>
-                  <PasswordStrength password={password} />
-                </div>
-
-                <div>
-                  <label htmlFor="confirm-password" className="block text-sm font-medium mb-1">
-                    Confirm Password
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Lock className="h-5 w-5 text-muted-foreground" />
-                    </div>
-                    <input
-                      id="confirm-password"
-                      name="confirm-password"
-                      type="password"
-                      required
-                      autoComplete="new-password"
-                      className="pl-10 w-full px-3 py-2 border rounded-md bg-background"
-                      placeholder="••••••••"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                    />
-                  </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-4 bg-card/80 text-muted-foreground backdrop-blur-sm">
+                    Or continue with email
+                  </span>
                 </div>
               </div>
 
-              {(error || validationError) && (
-                <div className="flex items-center gap-2 p-3 bg-destructive/10 text-destructive text-sm rounded-md">
-                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                  <span>{error || validationError}</span>
-                </div>
-              )}
+              {/* Registration Form */}
+              <form className="space-y-4" onSubmit={handleSubmit}>
+                <InputField
+                  id="name"
+                  label="Full Name"
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="John Doe"
+                  icon={User}
+                  delay={0.35}
+                />
 
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={loading}
-                size="lg"
+                <InputField
+                  id="email"
+                  label="Email address"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  icon={Mail}
+                  autoComplete="username"
+                  delay={0.4}
+                />
+
+                <InputField
+                  id="password"
+                  label="Password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  icon={Lock}
+                  autoComplete="new-password"
+                  delay={0.45}
+                >
+                  <div className="mt-2">
+                    <PasswordStrength password={password} />
+                  </div>
+                </InputField>
+
+                <InputField
+                  id="confirm-password"
+                  label="Confirm Password"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="••••••••"
+                  icon={Lock}
+                  autoComplete="new-password"
+                  delay={0.5}
+                />
+
+                {/* Error Message */}
+                {(error || validationError) && (
+                  <motion.div
+                    className="flex items-center gap-2 p-4 bg-destructive/10 border border-destructive/20 text-destructive text-sm rounded-xl"
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                  >
+                    <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                    <span>{error || validationError}</span>
+                  </motion.div>
+                )}
+
+                {/* Submit Button */}
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.55 }}
+                  className="pt-2"
+                >
+                  <Button
+                    type="submit"
+                    className="w-full bg-gradient-to-r from-brand-500 via-purple-500 to-brand-600 hover:shadow-glow text-white border-0 py-6 rounded-xl group relative overflow-hidden"
+                    disabled={loading}
+                    size="lg"
+                  >
+                    <span className="relative z-10 flex items-center justify-center">
+                      {loading ? (
+                        <>
+                          <motion.div
+                            className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full mr-2"
+                            animate={{ rotate: 360 }}
+                            transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                          />
+                          Creating account...
+                        </>
+                      ) : (
+                        <>
+                          Create account
+                          <ArrowRight className="ml-2 h-5 w-5 transition-transform group-hover:translate-x-1" />
+                        </>
+                      )}
+                    </span>
+                    <div className="absolute inset-0 bg-gradient-to-r from-brand-600 via-purple-600 to-brand-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </Button>
+                </motion.div>
+              </form>
+
+              {/* Sign In Link */}
+              <motion.div
+                className="mt-6 text-center text-sm"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.6 }}
               >
-                {loading ? 'Creating account...' : 'Create account'}
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-            </form>
-
-            <div className="mt-6 text-center text-sm">
-              <p className="text-muted-foreground">
-                Already have an account?{' '}
-                <Link href="/login" className="text-primary hover:text-primary/80 font-medium">
-                  Sign in
-                </Link>
-              </p>
+                <p className="text-muted-foreground">
+                  Already have an account?{' '}
+                  <Link
+                    href="/login"
+                    className="text-brand-500 hover:text-brand-600 font-medium transition-colors"
+                  >
+                    Sign in
+                  </Link>
+                </p>
+              </motion.div>
             </div>
-          </div>
+          </motion.div>
 
-          <div className="text-xs text-center text-muted-foreground">
+          {/* Terms & Privacy */}
+          <motion.div
+            className="text-xs text-center text-muted-foreground"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.7 }}
+          >
             By signing up, you agree to our{' '}
-            <Link href="/terms" className="underline hover:text-foreground">
+            <Link href="/terms" className="underline hover:text-foreground transition-colors">
               Terms of Service
             </Link>{' '}
             and{' '}
-            <Link href="/privacy" className="underline hover:text-foreground">
+            <Link href="/privacy" className="underline hover:text-foreground transition-colors">
               Privacy Policy
             </Link>
-          </div>
+          </motion.div>
         </motion.div>
       </div>
     </div>

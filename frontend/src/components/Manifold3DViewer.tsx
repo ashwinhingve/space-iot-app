@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, Suspense, useMemo, useEffect, useCallback } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { Canvas, ThreeEvent } from '@react-three/fiber';
 import {
   OrbitControls,
   Environment,
@@ -266,7 +266,7 @@ const ElectricValve: React.FC<{
   const [hovered, setHovered] = useState(false);
   const statusColor = status === 'ON' ? COLORS.valveOn : status === 'FAULT' ? COLORS.valveFault : COLORS.valveOff;
 
-  const handleClick = useCallback((e: THREE.Event) => {
+  const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     onClick?.();
   }, [onClick]);
