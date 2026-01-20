@@ -32,7 +32,6 @@ import {
   AlertTriangle,
   Power,
   RefreshCw,
-  Sparkles,
   LayoutDashboard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -49,6 +48,11 @@ export default function DashboardPage() {
   const { stats, analytics, systemHealth, alerts, recentActivity } = useSelector(
     (state: RootState) => state.dashboard
   );
+
+  // Debug: Log stats whenever they change
+  useEffect(() => {
+    console.log('Dashboard stats updated:', stats);
+  }, [stats]);
 
   const fetchAllData = useCallback(async () => {
     setIsRefreshing(true);
@@ -81,7 +85,7 @@ export default function DashboardPage() {
       dispatch(updateSystemHealth({ network: 'poor' }));
     });
 
-    newSocket.on('deviceData', (data: any) => {
+    newSocket.on('deviceData', (data: { deviceId: string; data: Record<string, unknown> }) => {
       dispatch(updateDeviceData({ deviceId: data.deviceId, data: data.data }));
       dispatch(addActivity({
         action: 'Data received',
@@ -90,13 +94,15 @@ export default function DashboardPage() {
       }));
     });
 
-    newSocket.on('deviceStatus', (data: any) => {
+    newSocket.on('deviceStatus', (data: { deviceId: string; status: string }) => {
       dispatch(updateDeviceStatus({ deviceId: data.deviceId, status: data.status }));
       dispatch(addActivity({
         action: `Device ${data.status}`,
         device: data.deviceId,
         status: data.status === 'online' ? 'success' : 'warning',
       }));
+      // Refresh stats when device status changes
+      dispatch(fetchDashboardStats());
     });
 
     const healthInterval = setInterval(() => {

@@ -152,10 +152,20 @@ const initialState: ManifoldState = {
 };
 
 // Async Thunks
+// Helper to get token from localStorage or Redux state
+const getToken = (state: { auth: { token: string } }): string | null => {
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('token');
+    if (token) return token;
+  }
+  return state.auth.token;
+};
+
 export const fetchManifolds = createAsyncThunk(
   'manifolds/fetchManifolds',
   async (params: { status?: string; page?: number; limit?: number } = {}, { getState }) => {
     const state = getState() as { auth: { token: string } };
+    const token = getToken(state);
     const queryParams = new URLSearchParams();
     if (params.status) queryParams.append('status', params.status);
     if (params.page) queryParams.append('page', params.page.toString());
@@ -164,7 +174,7 @@ export const fetchManifolds = createAsyncThunk(
     const url = `${API_ENDPOINTS.MANIFOLDS}${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
     const response = await fetch(url, {
       headers: {
-        Authorization: `Bearer ${state.auth.token}`,
+        Authorization: `Bearer ${token}`,
       },
     });
 
@@ -183,7 +193,7 @@ export const fetchManifoldDetail = createAsyncThunk(
     const state = getState() as { auth: { token: string } };
     const response = await fetch(API_ENDPOINTS.MANIFOLD_DETAIL(manifoldId), {
       headers: {
-        Authorization: `Bearer ${state.auth.token}`,
+        Authorization: `Bearer ${getToken(state)}`,
       },
     });
 
@@ -201,8 +211,8 @@ export const createManifold = createAsyncThunk(
     manifoldData: {
       name: string;
       esp32DeviceId: string;
-      specifications?: any;
-      installationDetails?: any;
+      specifications?: Partial<Manifold['specifications']>;
+      installationDetails?: Partial<Manifold['installationDetails']>;
       gpioPins?: number[];
     },
     { getState }
@@ -212,7 +222,7 @@ export const createManifold = createAsyncThunk(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${state.auth.token}`,
+        Authorization: `Bearer ${getToken(state)}`,
       },
       body: JSON.stringify(manifoldData),
     });
@@ -229,7 +239,7 @@ export const createManifold = createAsyncThunk(
 export const updateManifold = createAsyncThunk(
   'manifolds/updateManifold',
   async (
-    { manifoldId, data }: { manifoldId: string; data: any },
+    { manifoldId, data }: { manifoldId: string; data: Partial<Manifold> },
     { getState }
   ) => {
     const state = getState() as { auth: { token: string } };
@@ -237,7 +247,7 @@ export const updateManifold = createAsyncThunk(
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${state.auth.token}`,
+        Authorization: `Bearer ${getToken(state)}`,
       },
       body: JSON.stringify(data),
     });
@@ -257,7 +267,7 @@ export const deleteManifold = createAsyncThunk(
     const response = await fetch(API_ENDPOINTS.MANIFOLD_DETAIL(manifoldId), {
       method: 'DELETE',
       headers: {
-        Authorization: `Bearer ${state.auth.token}`,
+        Authorization: `Bearer ${getToken(state)}`,
       },
     });
 
@@ -280,7 +290,7 @@ export const sendValveCommand = createAsyncThunk(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${state.auth.token}`,
+        Authorization: `Bearer ${getToken(state)}`,
       },
       body: JSON.stringify({ action, duration }),
     });
@@ -317,7 +327,7 @@ export const createSchedule = createAsyncThunk(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${state.auth.token}`,
+        Authorization: `Bearer ${getToken(state)}`,
       },
       body: JSON.stringify({ cronExpression, action, duration, enabled }),
     });
@@ -340,7 +350,7 @@ export const acknowledgeAlarm = createAsyncThunk(
     const response = await fetch(API_ENDPOINTS.VALVE_ALARM_ACKNOWLEDGE(valveId, alarmId), {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${state.auth.token}`,
+        Authorization: `Bearer ${getToken(state)}`,
       },
     });
 
@@ -364,7 +374,7 @@ const manifoldSlice = createSlice({
 
       // Update valves in state
       if (state.valves[manifoldId]) {
-        valveUpdates.forEach((update: any) => {
+        valveUpdates.forEach((update: { valveNumber: number; status: 'ON' | 'OFF' | 'FAULT' }) => {
           const valve = state.valves[manifoldId].find(
             (v) => v.valveNumber === update.valveNumber
           );

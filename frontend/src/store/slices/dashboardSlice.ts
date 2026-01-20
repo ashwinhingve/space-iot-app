@@ -2,6 +2,33 @@ import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
+// Device and Manifold types for API responses
+interface DeviceResponse {
+  _id: string;
+  status: 'online' | 'offline';
+}
+
+interface ManifoldResponse {
+  _id: string;
+  status: 'Active' | 'Maintenance' | 'Offline' | 'Fault';
+}
+
+interface ValveResponse {
+  _id: string;
+  valveNumber: number;
+  operationalData?: {
+    currentStatus: 'ON' | 'OFF';
+  };
+  alarms?: Array<{
+    _id?: string;
+    alarmId?: string;
+    severity?: 'critical' | 'warning' | 'info';
+    message?: string;
+    timestamp?: string;
+    acknowledged?: boolean;
+  }>;
+}
+
 // Types
 export interface SystemHealth {
   cpu: number;
@@ -116,20 +143,37 @@ export const fetchDashboardStats = createAsyncThunk(
   'dashboard/fetchStats',
   async (_, { rejectWithValue }) => {
     try {
+      const headers = getAuthHeaders();
+      console.log('fetchDashboardStats - headers:', headers);
+
       // Fetch devices and manifolds in parallel
       const [devicesRes, manifoldsRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/devices`, { headers: getAuthHeaders() }),
-        fetch(`${API_BASE_URL}/api/manifolds`, { headers: getAuthHeaders() }),
+        fetch(`${API_BASE_URL}/api/devices`, { headers }),
+        fetch(`${API_BASE_URL}/api/manifolds`, { headers }),
       ]);
+
+      console.log('fetchDashboardStats - devicesRes.ok:', devicesRes.ok, 'status:', devicesRes.status);
+      console.log('fetchDashboardStats - manifoldsRes.ok:', manifoldsRes.ok, 'status:', manifoldsRes.status);
 
       const devices = devicesRes.ok ? await devicesRes.json() : [];
       const manifolds = manifoldsRes.ok ? await manifoldsRes.json() : [];
 
-      // Calculate stats from real data
-      const devicesOnline = devices.filter((d: any) => d.status === 'online').length;
-      const devicesOffline = devices.filter((d: any) => d.status === 'offline').length;
-      const manifoldsActive = manifolds.filter((m: any) => m.status === 'Active').length;
-      const manifoldsFault = manifolds.filter((m: any) => m.status === 'Fault').length;
+      console.log('fetchDashboardStats - devices count:', devices.length, 'manifolds count:', manifolds.length);
+      console.log('fetchDashboardStats - devices:', devices);
+
+      // Calculate stats from real data (case-insensitive comparison)
+      const devicesOnline = devices.filter((d: DeviceResponse) =>
+        d.status?.toLowerCase() === 'online'
+      ).length;
+      const devicesOffline = devices.filter((d: DeviceResponse) =>
+        d.status?.toLowerCase() === 'offline' || !d.status
+      ).length;
+
+      console.log('fetchDashboardStats - devicesOnline:', devicesOnline, 'devicesOffline:', devicesOffline);
+      console.log('fetchDashboardStats - device statuses:', devices.map((d: DeviceResponse) => ({ name: d._id, status: d.status })));
+
+      const manifoldsActive = manifolds.filter((m: ManifoldResponse) => m.status === 'Active').length;
+      const manifoldsFault = manifolds.filter((m: ManifoldResponse) => m.status === 'Fault').length;
 
       // Get valve counts from manifolds
       let valvesOn = 0;
@@ -143,11 +187,11 @@ export const fetchDashboardStats = createAsyncThunk(
             { headers: getAuthHeaders() }
           );
           if (valvesRes.ok) {
-            const valves = await valvesRes.json();
-            valvesOn += valves.filter((v: any) => v.operationalData?.currentStatus === 'ON').length;
-            valvesOff += valves.filter((v: any) => v.operationalData?.currentStatus === 'OFF').length;
-            valves.forEach((v: any) => {
-              activeAlerts += (v.alarms || []).filter((a: any) => !a.acknowledged).length;
+            const valves: ValveResponse[] = await valvesRes.json();
+            valvesOn += valves.filter((v) => v.operationalData?.currentStatus === 'ON').length;
+            valvesOff += valves.filter((v) => v.operationalData?.currentStatus === 'OFF').length;
+            valves.forEach((v) => {
+              activeAlerts += (v.alarms || []).filter((a) => !a.acknowledged).length;
             });
           }
         } catch (e) {
@@ -165,8 +209,8 @@ export const fetchDashboardStats = createAsyncThunk(
         activeAlerts,
         systemUptime: Math.floor((Date.now() - new Date().setHours(0, 0, 0, 0)) / 1000),
       };
-    } catch (error: any) {
-      return rejectWithValue(error.message || 'Failed to fetch dashboard stats');
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Failed to fetch dashboard stats');
     }
   }
 );
@@ -209,7 +253,6 @@ export const fetchAnalytics = createAsyncThunk(
       };
 
       // Real metrics
-      let totalValves = 0;
       let activeValves = 0;
       let totalAlerts = 0;
       let criticalAlerts = 0;
@@ -221,13 +264,12 @@ export const fetchAnalytics = createAsyncThunk(
             { headers: getAuthHeaders() }
           );
           if (valvesRes.ok) {
-            const valves = await valvesRes.json();
-            totalValves += valves.length;
-            activeValves += valves.filter((v: any) => v.operationalData?.currentStatus === 'ON').length;
-            valves.forEach((v: any) => {
+            const valves: ValveResponse[] = await valvesRes.json();
+            activeValves += valves.filter((v) => v.operationalData?.currentStatus === 'ON').length;
+            valves.forEach((v) => {
               const alarms = v.alarms || [];
-              totalAlerts += alarms.filter((a: any) => !a.acknowledged).length;
-              criticalAlerts += alarms.filter((a: any) => !a.acknowledged && a.severity === 'critical').length;
+              totalAlerts += alarms.filter((a) => !a.acknowledged).length;
+              criticalAlerts += alarms.filter((a) => !a.acknowledged && a.severity === 'critical').length;
             });
           }
         } catch (e) {
@@ -241,15 +283,15 @@ export const fetchAnalytics = createAsyncThunk(
         energyConsumption,
         systemMetrics: {
           totalDevices: devices.length,
-          onlineDevices: devices.filter((d: any) => d.status === 'online').length,
+          onlineDevices: devices.filter((d: DeviceResponse) => d.status === 'online').length,
           totalManifolds: manifolds.length,
           activeValves,
           totalAlerts,
           criticalAlerts,
         },
       };
-    } catch (error: any) {
-      return rejectWithValue(error.message || 'Failed to fetch analytics');
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Failed to fetch analytics');
     }
   }
 );
@@ -276,9 +318,9 @@ export const fetchAlerts = createAsyncThunk(
             { headers: getAuthHeaders() }
           );
           if (valvesRes.ok) {
-            const valves = await valvesRes.json();
-            valves.forEach((valve: any) => {
-              (valve.alarms || []).forEach((alarm: any) => {
+            const valves: ValveResponse[] = await valvesRes.json();
+            valves.forEach((valve) => {
+              (valve.alarms || []).forEach((alarm) => {
                 allAlerts.push({
                   id: alarm._id || alarm.alarmId || `${valve._id}-${Date.now()}`,
                   type: alarm.severity === 'critical' ? 'critical' :
@@ -301,8 +343,8 @@ export const fetchAlerts = createAsyncThunk(
       return allAlerts.sort((a, b) =>
         new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
       );
-    } catch (error: any) {
-      return rejectWithValue(error.message || 'Failed to fetch alerts');
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Failed to fetch alerts');
     }
   }
 );

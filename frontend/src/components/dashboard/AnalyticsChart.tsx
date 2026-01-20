@@ -37,12 +37,24 @@ interface AnalyticsChartProps {
   delay?: number;
 }
 
-const CustomTooltip = ({ active, payload, label }: any) => {
+interface TooltipPayloadEntry {
+  name: string;
+  value: number;
+  color: string;
+}
+
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: TooltipPayloadEntry[];
+  label?: string;
+}
+
+const CustomTooltip = ({ active, payload, label }: CustomTooltipProps) => {
   if (active && payload && payload.length) {
     return (
       <div className="bg-background/95 backdrop-blur-lg border border-border/50 rounded-lg p-3 shadow-xl">
         <p className="text-sm font-medium text-foreground mb-1">{label}</p>
-        {payload.map((entry: any, index: number) => (
+        {payload.map((entry, index) => (
           <p
             key={index}
             className="text-sm"
@@ -68,7 +80,7 @@ export function AnalyticsChart({
 }: AnalyticsChartProps) {
   // Transform data for recharts
   const chartData = data.labels.map((label, index) => {
-    const item: any = { name: label };
+    const item: Record<string, string | number> = { name: label };
     if (data.data) {
       item.value = data.data[index];
     }

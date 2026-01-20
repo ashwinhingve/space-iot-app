@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useMemo } from 'react'
-import { useFrame, extend } from '@react-three/fiber'
+import { useFrame } from '@react-three/fiber'
 import { Line } from '@react-three/drei'
 import * as THREE from 'three'
 
@@ -19,6 +19,7 @@ export function BezierConnection({
   end,
   color = '#8b5cf6',
   opacity = 0.4,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   lineWidth = 1,
   animated = true
 }: BezierConnectionProps) {
@@ -26,7 +27,7 @@ export function BezierConnection({
   const materialRef = useRef<THREE.MeshBasicMaterial>(null)
 
   // Create bezier curve
-  const { curve, geometry } = useMemo(() => {
+  const { geometry } = useMemo(() => {
     const midPoint = new THREE.Vector3().lerpVectors(start, end, 0.5)
 
     // Add some curvature by offsetting the midpoint
@@ -50,7 +51,7 @@ export function BezierConnection({
       false // closed
     )
 
-    return { curve, geometry: tubeGeometry }
+    return { geometry: tubeGeometry }
   }, [start, end])
 
   // Animation for pulsing effect

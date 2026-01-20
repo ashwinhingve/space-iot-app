@@ -2,9 +2,9 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { controlDevice, updateDeviceStatus, updateDeviceData, saveWiFiConfig, fetchWiFiConfigs, clearWiFiMessages } from '@/store/slices/deviceSlice';
+import { controlDevice, updateDeviceStatus, updateDeviceData, saveWiFiConfig, fetchWiFiConfigs, clearWiFiMessages, deleteDevice, updateDevice, deleteWiFiConfig } from '@/store/slices/deviceSlice';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wifi, X, Eye, EyeOff, CheckCircle, AlertCircle, Loader2, Copy, Check } from 'lucide-react';
+import { Wifi, X, Eye, EyeOff, CheckCircle, AlertCircle, Loader2, Copy, Check, Edit3, Trash2, MoreVertical } from 'lucide-react';
 import { AppDispatch, RootState } from '@/store/store';
 import { io } from 'socket.io-client';
 import { SOCKET_CONFIG } from '@/lib/config';
@@ -272,6 +272,7 @@ const WiFiConfigModal = ({ isOpen, onClose, deviceId, deviceName }: WiFiConfigMo
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Find existing config for this device
   const existingConfig = wifiConfigs.find(c => c.deviceId === deviceId);
@@ -292,6 +293,7 @@ const WiFiConfigModal = ({ isOpen, onClose, deviceId, deviceName }: WiFiConfigMo
       dispatch(clearWiFiMessages());
       setPassword('');
       setShowPassword(false);
+      setShowDeleteConfirm(false);
     }
   }, [isOpen, dispatch]);
 
@@ -306,6 +308,12 @@ const WiFiConfigModal = ({ isOpen, onClose, deviceId, deviceName }: WiFiConfigMo
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
+  };
+
+  const handleDeleteConfig = async () => {
+    await dispatch(deleteWiFiConfig(deviceId));
+    setShowDeleteConfirm(false);
+    setSsid('');
   };
 
   if (!isOpen) return null;
@@ -440,7 +448,271 @@ const WiFiConfigModal = ({ isOpen, onClose, deviceId, deviceName }: WiFiConfigMo
                 </>
               )}
             </button>
+
+            {/* Delete Config Section */}
+            {existingConfig && (
+              <div className="mt-4 pt-4 border-t border-gray-700">
+                {!showDeleteConfirm ? (
+                  <button
+                    type="button"
+                    className="w-full py-2.5 px-4 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors flex items-center justify-center gap-2"
+                    onClick={() => setShowDeleteConfirm(true)}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Delete WiFi Configuration
+                  </button>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-sm text-gray-400 text-center">
+                      Are you sure you want to delete this WiFi configuration?
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="flex-1 py-2 px-3 rounded-lg border border-gray-600 text-gray-400 hover:bg-gray-700 transition-colors text-sm"
+                        onClick={() => setShowDeleteConfirm(false)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="flex-1 py-2 px-3 rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors text-sm flex items-center justify-center gap-1"
+                        onClick={handleDeleteConfig}
+                        disabled={wifiLoading}
+                      >
+                        {wifiLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </form>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+};
+
+// ============================================
+// EDIT DEVICE MODAL COMPONENT
+// ============================================
+interface EditDeviceModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  device: {
+    _id: string;
+    name: string;
+    type: string;
+    mqttTopic: string;
+  };
+}
+
+const EditDeviceModal = ({ isOpen, onClose, device }: EditDeviceModalProps) => {
+  const dispatch = useDispatch<AppDispatch>();
+  const [name, setName] = useState(device.name);
+  const [type, setType] = useState(device.type);
+  const [mqttTopic, setMqttTopic] = useState(device.mqttTopic);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setName(device.name);
+      setType(device.type);
+      setMqttTopic(device.mqttTopic);
+      setError(null);
+    }
+  }, [isOpen, device]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      await dispatch(updateDevice({ deviceId: device._id, data: { name, type, mqttTopic } })).unwrap();
+      onClose();
+    } catch (err) {
+      setError('Failed to update device');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        className="wifi-modal-overlay"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+      >
+        <motion.div
+          className="wifi-modal"
+          initial={{ scale: 0.9, opacity: 0, y: 20 }}
+          animate={{ scale: 1, opacity: 1, y: 0 }}
+          exit={{ scale: 0.9, opacity: 0, y: 20 }}
+          transition={{ type: 'spring', duration: 0.5 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="wifi-modal-header">
+            <div>
+              <h2 className="wifi-modal-title">
+                <Edit3 className="w-5 h-5" />
+                Edit Device
+              </h2>
+              <p className="wifi-modal-subtitle">Update device settings</p>
+            </div>
+            <button className="wifi-modal-close" onClick={onClose}>
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <form onSubmit={handleSubmit} className="wifi-modal-content">
+            {error && (
+              <div className="wifi-message error">
+                <AlertCircle className="w-4 h-4" />
+                {error}
+              </div>
+            )}
+
+            <div className="wifi-field">
+              <label className="wifi-label">Device Name</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="wifi-input"
+                placeholder="Enter device name"
+                required
+              />
+            </div>
+
+            <div className="wifi-field">
+              <label className="wifi-label">Device Type</label>
+              <select
+                value={type}
+                onChange={(e) => setType(e.target.value)}
+                className="wifi-input"
+                required
+              >
+                <option value="switch">Switch</option>
+                <option value="slider">Slider</option>
+                <option value="sensor">Sensor</option>
+                <option value="chart">Chart</option>
+              </select>
+            </div>
+
+            <div className="wifi-field">
+              <label className="wifi-label">MQTT Topic</label>
+              <input
+                type="text"
+                value={mqttTopic}
+                onChange={(e) => setMqttTopic(e.target.value)}
+                className="wifi-input"
+                placeholder="devices/esp32-001"
+                required
+              />
+              <p className="wifi-hint">Format: devices/your-device-id</p>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex-1 py-3 px-4 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex-1 py-3 px-4 rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                Save Changes
+              </button>
+            </div>
+          </form>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+};
+
+// ============================================
+// DELETE CONFIRMATION MODAL COMPONENT
+// ============================================
+interface DeleteConfirmModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  deviceName: string;
+  loading: boolean;
+}
+
+const DeleteConfirmModal = ({ isOpen, onClose, onConfirm, deviceName, loading }: DeleteConfirmModalProps) => {
+  if (!isOpen) return null;
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        className="wifi-modal-overlay"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+      >
+        <motion.div
+          className="wifi-modal"
+          style={{ maxWidth: '400px' }}
+          initial={{ scale: 0.9, opacity: 0, y: 20 }}
+          animate={{ scale: 1, opacity: 1, y: 0 }}
+          exit={{ scale: 0.9, opacity: 0, y: 20 }}
+          transition={{ type: 'spring', duration: 0.5 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="wifi-modal-header">
+            <div>
+              <h2 className="wifi-modal-title" style={{ color: '#ef4444' }}>
+                <Trash2 className="w-5 h-5" />
+                Delete Device
+              </h2>
+            </div>
+            <button className="wifi-modal-close" onClick={onClose}>
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="wifi-modal-content">
+            <p className="text-gray-300 mb-6">
+              Are you sure you want to delete <strong className="text-white">{deviceName}</strong>? This action cannot be undone.
+            </p>
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={loading}
+                className="flex-1 py-3 px-4 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={onConfirm}
+                disabled={loading}
+                className="flex-1 py-3 px-4 rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                Delete
+              </button>
+            </div>
+          </div>
         </motion.div>
       </motion.div>
     </AnimatePresence>
@@ -492,11 +764,33 @@ export const ModernDeviceCard = ({ device }: ModernDeviceCardProps) => {
   const [valves, setValves] = useState<{ v1: boolean; v2: boolean; v3: boolean; v4: boolean } | undefined>(device.settings?.valves);
   const [sensorHistory, setSensorHistory] = useState<number[]>([]);
   const [showWiFiModal, setShowWiFiModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [temperature, setTemperature] = useState<number | undefined>(device.settings?.temperature);
   const [humidity, setHumidity] = useState<number | undefined>(device.settings?.humidity);
   const [lastValue, setLastValue] = useState<number | undefined>(device.settings?.value ?? device.lastData?.value);
 
   const socketRef = React.useRef<ReturnType<typeof io> | null>(null);
+  const menuRef = React.useRef<HTMLDivElement>(null);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowMenu(false);
+      }
+    };
+
+    if (showMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showMenu]);
 
   useEffect(() => {
     socketRef.current = io(SOCKET_CONFIG.URL, SOCKET_CONFIG.OPTIONS);
@@ -566,6 +860,18 @@ export const ModernDeviceCard = ({ device }: ModernDeviceCardProps) => {
     setValves(prev => prev ? { ...prev, [valve]: value } : { v1: false, v2: false, v3: false, v4: false, [valve]: value });
   }, []);
 
+  const handleDelete = useCallback(async () => {
+    setDeleteLoading(true);
+    try {
+      await dispatch(deleteDevice(device._id)).unwrap();
+      setShowDeleteModal(false);
+    } catch (err) {
+      console.error('Failed to delete device:', err);
+    } finally {
+      setDeleteLoading(false);
+    }
+  }, [device._id, dispatch]);
+
   // Extract device ID from MQTT topic
   const deviceId = device.mqttTopic.split('/').pop() || device._id.slice(-8);
 
@@ -581,8 +887,47 @@ export const ModernDeviceCard = ({ device }: ModernDeviceCardProps) => {
         transition={{ duration: 0.4 }}
       >
         {/* Card Header */}
-        <div className="card-header">
+        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 className="card-title">{device.name}</h3>
+
+          {/* Menu Button */}
+          <div className="relative" ref={menuRef}>
+            <motion.button
+              className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+              onClick={() => setShowMenu(!showMenu)}
+              whileTap={{ scale: 0.95 }}
+            >
+              <MoreVertical className="w-5 h-5 text-gray-400" />
+            </motion.button>
+
+            {/* Dropdown Menu */}
+            <AnimatePresence>
+              {showMenu && (
+                <motion.div
+                  className="absolute right-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl overflow-hidden z-50"
+                  initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                  transition={{ duration: 0.15 }}
+                >
+                  <button
+                    className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-gray-300 hover:bg-purple-600/20 hover:text-purple-400 transition-colors"
+                    onClick={() => { setShowEditModal(true); setShowMenu(false); }}
+                  >
+                    <Edit3 className="w-4 h-4" />
+                    Edit Device
+                  </button>
+                  <button
+                    className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-gray-300 hover:bg-red-600/20 hover:text-red-400 transition-colors"
+                    onClick={() => { setShowDeleteModal(true); setShowMenu(false); }}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Delete Device
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
 
         {/* Main Content */}
@@ -675,6 +1020,22 @@ export const ModernDeviceCard = ({ device }: ModernDeviceCardProps) => {
         onClose={() => setShowWiFiModal(false)}
         deviceId={deviceId}
         deviceName={device.name}
+      />
+
+      {/* Edit Device Modal */}
+      <EditDeviceModal
+        isOpen={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        device={device}
+      />
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        isOpen={showDeleteModal}
+        onClose={() => setShowDeleteModal(false)}
+        onConfirm={handleDelete}
+        deviceName={device.name}
+        loading={deleteLoading}
       />
     </>
   );

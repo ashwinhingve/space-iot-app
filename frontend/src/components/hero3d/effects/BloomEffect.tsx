@@ -13,13 +13,15 @@ interface BloomEffectProps {
 
 // This component is now a no-op placeholder since bloom is handled
 // through material properties (emissive + transparent shells)
-export function BloomEffect(_props: BloomEffectProps) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function BloomEffect(props: BloomEffectProps) {
   // Bloom is now achieved through emissive materials on nodes
   // and transparent glow shells, rather than post-processing
   return null
 }
 
-export function EnhancedBloomEffect(_props: {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function EnhancedBloomEffect(props: {
   bloomIntensity?: number
   enabled?: boolean
 }) {

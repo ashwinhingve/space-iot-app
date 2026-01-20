@@ -16,9 +16,6 @@ const protectedRoutes = ['/dashboard', '/devices', '/manifolds', '/device'];
 // Routes that should redirect to dashboard if already authenticated
 const authRoutes = ['/login', '/register'];
 
-// Public routes that don't require authentication
-const publicRoutes = ['/', '/documentation'];
-
 export function AuthGuard({ children }: AuthGuardProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -28,7 +25,6 @@ export function AuthGuard({ children }: AuthGuardProps) {
 
   const isProtectedRoute = protectedRoutes.some(route => pathname?.startsWith(route));
   const isAuthRoute = authRoutes.some(route => pathname?.startsWith(route));
-  const isPublicRoute = publicRoutes.some(route => pathname === route);
 
   // Initialize auth state from localStorage on mount
   useEffect(() => {

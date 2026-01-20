@@ -10,7 +10,6 @@ import {
   XCircle,
   Clock,
   Activity,
-  User,
 } from 'lucide-react';
 
 interface ActivityItem {

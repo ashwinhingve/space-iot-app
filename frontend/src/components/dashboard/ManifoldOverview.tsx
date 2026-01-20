@@ -5,7 +5,6 @@ import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import {
   Box,
-  Activity,
   AlertTriangle,
   CheckCircle,
   Wrench,

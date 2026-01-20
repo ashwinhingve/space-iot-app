@@ -11,7 +11,7 @@ import { PasswordStrength } from '@/components/PasswordStrength';
 import { RootState, AppDispatch } from '@/store/store';
 import { motion } from 'framer-motion';
 import AnimatedBackground from '@/components/AnimatedBackground';
-import { ArrowRight, Lock, Mail, User, AlertCircle, Sparkles, Zap, Rocket } from 'lucide-react';
+import { ArrowRight, Lock, Mail, User, AlertCircle, Zap, Rocket, LucideIcon } from 'lucide-react';
 
 export default function RegisterPage() {
   const [name, setName] = useState('');
@@ -90,7 +90,7 @@ export default function RegisterPage() {
     value: string;
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
     placeholder: string;
-    icon: any;
+    icon: LucideIcon;
     autoComplete?: string;
     delay?: number;
     children?: React.ReactNode;

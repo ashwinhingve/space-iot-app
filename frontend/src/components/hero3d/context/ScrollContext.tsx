@@ -1,7 +1,7 @@
 'use client'
 
 import React, { createContext, useContext, useRef, useEffect, useState } from 'react'
-import { useScroll, useTransform, useSpring, MotionValue } from 'framer-motion'
+import { useScroll, useSpring, MotionValue } from 'framer-motion'
 
 interface ScrollContextValue {
   scrollProgress: MotionValue<number>

@@ -15,9 +15,9 @@ interface AmbientParticlesProps {
 export function AmbientParticles({
   count = 200,
   radius = 10,
-  color = '#00D9FF',
+  color = '#5EEAD4',
   size = 0.03,
-  speed = 0.2
+  speed = 0.06
 }: AmbientParticlesProps) {
   const pointsRef = useRef<THREE.Points>(null)
 
@@ -101,11 +101,11 @@ export function AmbientParticles({
   )
 }
 
-// Sparkle effect - brighter, faster particles
+// Sparkle effect - brighter accent particles
 export function SparkleParticles({
   count = 50,
   radius = 6,
-  color = '#00FFF0',
+  color = '#5EEAD4',
   size = 0.05
 }: {
   count?: number

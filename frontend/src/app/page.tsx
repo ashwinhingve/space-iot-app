@@ -1,11 +1,22 @@
 'use client'
 
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import { MainLayout } from '@/components/MainLayout'
 import { ParticleBackground, FloatingOrbs } from '@/components/ParticleBackground'
-import { Hero3DScene } from '@/components/hero3d'
+
+// Dynamically import Hero3DScene with SSR disabled to avoid window reference errors
+const Hero3DScene = dynamic(
+  () => import('@/components/hero3d').then((mod) => mod.Hero3DScene),
+  { ssr: false }
+)
+// GSAP scroll reveal components (available for use)
+// import { ScrollReveal, ScrollRevealGroup } from '@/components/ui/ScrollReveal'
+// import { TextReveal, AnimatedHeadline } from '@/components/ui/TextReveal'
 import { motion, useScroll, useTransform, useSpring, useInView } from 'framer-motion'
-import { useRef } from 'react'
+import { useRef, useEffect } from 'react'
+import { gsap } from 'gsap'
+import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import {
   Zap,
   LineChart,
@@ -23,18 +34,23 @@ import {
   Users,
   Activity,
   Lock,
-  MousePointer,
 } from 'lucide-react'
 
-// Animation variants - ease arrays typed as const for Framer Motion compatibility
+// Register GSAP plugins
+if (typeof window !== 'undefined') {
+  gsap.registerPlugin(ScrollTrigger)
+}
+
+// Animation variants - cinematic timing with blur transitions
 const easeOut = [0.16, 1, 0.3, 1] as const
 
 const fadeInUp = {
-  hidden: { opacity: 0, y: 60 },
+  hidden: { opacity: 0, y: 20, scale: 0.96 },
   visible: {
     opacity: 1,
     y: 0,
-    transition: { duration: 0.8, ease: easeOut }
+    scale: 1,
+    transition: { duration: 0.6, ease: easeOut }
   }
 } as const
 
@@ -42,7 +58,7 @@ const fadeIn = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
-    transition: { duration: 1, ease: 'easeOut' as const }
+    transition: { duration: 0.6, ease: 'easeOut' as const }
   }
 } as const
 
@@ -51,14 +67,15 @@ const staggerContainer = {
   visible: {
     opacity: 1,
     transition: {
-      staggerChildren: 0.1,
+      staggerChildren: 0.12,
       delayChildren: 0.1
     }
   }
 } as const
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const scaleIn = {
-  hidden: { opacity: 0, scale: 0.8 },
+  hidden: { opacity: 0, scale: 0.96 },
   visible: {
     opacity: 1,
     scale: 1,
@@ -67,20 +84,22 @@ const scaleIn = {
 } as const
 
 const slideInLeft = {
-  hidden: { opacity: 0, x: -80 },
+  hidden: { opacity: 0, x: -40, scale: 0.96 },
   visible: {
     opacity: 1,
     x: 0,
-    transition: { duration: 0.8, ease: easeOut }
+    scale: 1,
+    transition: { duration: 0.6, ease: easeOut }
   }
 } as const
 
 const slideInRight = {
-  hidden: { opacity: 0, x: 80 },
+  hidden: { opacity: 0, x: 40, scale: 0.96 },
   visible: {
     opacity: 1,
     x: 0,
-    transition: { duration: 0.8, ease: easeOut }
+    scale: 1,
+    transition: { duration: 0.6, ease: easeOut }
   }
 } as const
 
@@ -190,7 +209,7 @@ function AnimatedCounter({ value, suffix = '' }: { value: string, suffix?: strin
   )
 }
 
-// Section wrapper with scroll animations
+// Section wrapper with GSAP scroll animations
 function AnimatedSection({
   children,
   className = '',
@@ -200,25 +219,43 @@ function AnimatedSection({
   className?: string
   delay?: number
 }) {
-  const ref = useRef(null)
-  const isInView = useInView(ref, { once: true, margin: "-100px" })
+  const sectionRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    if (!sectionRef.current) return
+
+    const section = sectionRef.current
+
+    // Set initial state
+    gsap.set(section, {
+      opacity: 0,
+    })
+
+    // Create scroll-triggered animation
+    const animation = gsap.to(section, {
+      opacity: 1,
+      duration: 0.6,
+      delay,
+      ease: 'power2.out',
+      scrollTrigger: {
+        trigger: section,
+        start: 'top 85%',
+        toggleActions: 'play none none reverse',
+      },
+    })
+
+    return () => {
+      animation.kill()
+    }
+  }, [delay])
 
   return (
-    <motion.section
-      ref={ref}
-      initial="hidden"
-      animate={isInView ? "visible" : "hidden"}
-      variants={{
-        hidden: { opacity: 0 },
-        visible: {
-          opacity: 1,
-          transition: { delay, staggerChildren: 0.1 }
-        }
-      }}
+    <section
+      ref={sectionRef}
       className={className}
     >
       {children}
-    </motion.section>
+    </section>
   )
 }
 
@@ -250,6 +287,12 @@ export default function HomePage() {
         ref={heroRef}
         className="relative min-h-screen flex items-center justify-center overflow-hidden"
       >
+        {/* Cinematic background gradient */}
+        <div className="absolute inset-0 bg-gradient-to-b from-[#0B0F1A] via-[#1A1F2E] to-[#0B0F1A]" />
+
+        {/* Central ambient orb blur effect */}
+        <div className="hero-orb-blur" />
+
         {/* WebGL 3D IoT Network Visualization */}
         <Hero3DScene
           className="opacity-90"
@@ -267,7 +310,7 @@ export default function HomePage() {
         />
 
         {/* Gradient Overlay */}
-        <div className="absolute inset-0 bg-gradient-to-b from-background/50 via-background/30 to-background pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background pointer-events-none" />
 
         {/* Grid Pattern */}
         <motion.div

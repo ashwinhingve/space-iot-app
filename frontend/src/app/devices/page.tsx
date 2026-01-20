@@ -5,7 +5,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { MainLayout } from '@/components/MainLayout';
 import { Button } from '@/components/ui/button';
 import AnimatedBackground from '@/components/AnimatedBackground';
-import { createDevice, fetchDevices, deleteDevice } from '@/store/slices/deviceSlice';
+import { createDevice, fetchDevices } from '@/store/slices/deviceSlice';
 import { RootState } from '@/store/store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, X, Smartphone, Sparkles, Cpu, Wifi } from 'lucide-react';
@@ -59,15 +59,6 @@ export default function DevicesPage() {
     }
   };
 
-  const handleDelete = async (deviceId: string) => {
-    if (window.confirm('Are you sure you want to delete this device?')) {
-      try {
-        await dispatch(deleteDevice(deviceId));
-      } catch (error) {
-        console.error('Failed to delete device:', error);
-      }
-    }
-  };
 
   return (
     <MainLayout>
@@ -316,7 +307,7 @@ export default function DevicesPage() {
                 }
               }}
             >
-              {devices.map((device: DeviceType, index: number) => (
+              {devices.map((device: DeviceType) => (
                 <motion.div
                   key={device._id}
                   variants={{

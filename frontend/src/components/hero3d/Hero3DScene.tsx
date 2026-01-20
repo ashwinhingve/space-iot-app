@@ -3,12 +3,14 @@
 import { Suspense, useState, useEffect, useRef, useCallback } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { useReducedMotion } from 'framer-motion'
-import { useScroll, useTransform, useSpring } from 'framer-motion'
+import { useScroll, useSpring } from 'framer-motion'
 import { ThreeEvent } from '@react-three/fiber'
 import { NetworkVisualization } from './NetworkVisualization'
 import { BloomEffect } from './effects/BloomEffect'
+import { GlowOrbCluster } from './effects/GlowOrb'
+import { CinematicParticles } from './effects/CinematicParticles'
 import { NodeTooltip } from './ui/NodeTooltip'
-import { getInitialQuality, useDeviceCapabilities } from './hooks/useAdaptiveQuality'
+import { useDeviceCapabilities } from './hooks/useAdaptiveQuality'
 import { ParticleBackground, FloatingOrbs } from '@/components/ParticleBackground'
 
 interface Hero3DSceneProps {
@@ -25,7 +27,7 @@ function useWebGLSupport() {
       const canvas = document.createElement('canvas')
       const gl = canvas.getContext('webgl2') || canvas.getContext('webgl')
       setHasWebGL(!!gl)
-    } catch (e) {
+    } catch {
       setHasWebGL(false)
     }
   }, [])
@@ -75,22 +77,52 @@ function StaticFallback() {
   )
 }
 
+// Mobile configuration helper
+function getMobileConfig(isMobile: boolean, gpuTier: string) {
+  return {
+    particleCount: isMobile ? 40 : gpuTier === 'low' ? 60 : 120,
+    nodeCount: isMobile ? 10 : gpuTier === 'low' ? 15 : 25,
+    showDataFlow: !isMobile && gpuTier !== 'low',
+    showCursorInteraction: !isMobile,
+    dpr: isMobile ? 1 : Math.min(1.5, typeof window !== 'undefined' ? window.devicePixelRatio : 1)
+  }
+}
+
 // Inner 3D scene component
 function Scene({
   scrollProgress,
   quality,
+  isMobile,
   onHover,
   onHoverEnd,
   onClick
 }: {
   scrollProgress: number
   quality: 'high' | 'medium' | 'low'
+  isMobile: boolean
   onHover: (event: ThreeEvent<PointerEvent>, data: { id: string; label: string; type: string }) => void
   onHoverEnd: () => void
   onClick: (event: ThreeEvent<MouseEvent>, data: { id: string; label: string; type: string }) => void
 }) {
+  const config = getMobileConfig(isMobile, quality)
+
   return (
     <>
+      {/* Central ambient glow orb */}
+      {quality !== 'low' && <GlowOrbCluster position={[0, 0, -2]} />}
+
+      {/* Cinematic particles with cursor interaction */}
+      <CinematicParticles
+        count={config.particleCount}
+        radius={8}
+        color="#5EEAD4"
+        size={0.025}
+        speed={0.08}
+        cursorInteraction={config.showCursorInteraction}
+        attractStrength={0.02}
+        brightenOnHover={true}
+      />
+
       <NetworkVisualization
         scrollProgress={scrollProgress}
         quality={quality}
@@ -166,7 +198,6 @@ export function Hero3DScene({ className = '', fallback }: Hero3DSceneProps) {
     event: ThreeEvent<PointerEvent>,
     data: { id: string; label: string; type: string }
   ) => {
-    const canvas = event.object.parent?.parent?.parent as unknown as { domElement?: HTMLElement }
     const rect = containerRef.current?.getBoundingClientRect()
     if (!rect) return
 
@@ -239,6 +270,7 @@ export function Hero3DScene({ className = '', fallback }: Hero3DSceneProps) {
           <Scene
             scrollProgress={scrollValue}
             quality={quality}
+            isMobile={isMobile}
             onHover={handleNodeHover}
             onHoverEnd={handleNodeHoverEnd}
             onClick={handleNodeClick}

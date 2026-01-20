@@ -191,18 +191,18 @@ export function generateNetwork(options: {
   return { nodes, connections }
 }
 
-// Get color for node type
+// Get color for node type - cinematic palette
 export function getNodeColor(type: NetworkNode['type']): string {
   switch (type) {
     case 'hub':
-      return '#00D9FF' // Electric blue
+      return '#5EEAD4' // Cinematic teal
     case 'gateway':
-      return '#8b5cf6' // Purple
+      return '#8B5CF6' // Purple
     case 'sensor':
-      return '#00FFF0' // Cyan
+      return '#5EEAD4' // Cinematic teal
     case 'device':
     default:
-      return '#00D9FF' // Electric blue
+      return '#5EEAD4' // Cinematic teal
   }
 }
 

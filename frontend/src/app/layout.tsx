@@ -1,6 +1,7 @@
 import { Inter as FontSans } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/components/Providers';
+import { LenisProvider } from '@/lib/smoothScroll';
 
 const fontSans = FontSans({
   subsets: ['latin'],
@@ -25,7 +26,9 @@ export default function RootLayout({
       </head>
       <body className={`${fontSans.variable} font-sans antialiased`}>
         <Providers>
-          {children}
+          <LenisProvider>
+            {children}
+          </LenisProvider>
         </Providers>
       </body>
     </html>

@@ -3,15 +3,11 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import {
-  Wifi,
-  WifiOff,
   Activity,
   Cpu,
   Thermometer,
-  Droplets,
   Gauge,
   Power,
-  MoreVertical,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 

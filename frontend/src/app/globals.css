@@ -8,10 +8,14 @@
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
 
-    /* Hero 3D visualization colors */
-    --hero-glow: #00D9FF;
-    --hero-cyan: #00FFF0;
-    --hero-purple: #6C2BD9;
+    /* Hero 3D visualization colors - Cinematic palette */
+    --hero-bg-primary: #0B0F1A;
+    --hero-bg-secondary: #1A1F2E;
+    --hero-accent-teal: #5EEAD4;
+    --hero-accent-purple: #8B5CF6;
+    --hero-glow: #5EEAD4;
+    --hero-cyan: #5EEAD4;
+    --hero-purple: #8B5CF6;
 
     --card: 0 0% 100%;
     --card-foreground: 222.2 84% 4.9%;
@@ -2311,4 +2315,88 @@ input:focus, textarea:focus, select:focus {
   .dashboard-stats-grid {
     grid-template-columns: repeat(2, 1fr) !important;
   }
+}
+
+/* ============================================
+   CINEMATIC HERO EFFECTS
+   ============================================ */
+
+/* Central orb blur effect */
+.hero-orb-blur {
+  position: absolute;
+  width: 600px;
+  height: 600px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(
+    circle,
+    rgba(94, 234, 212, 0.15) 0%,
+    rgba(139, 92, 246, 0.08) 40%,
+    transparent 70%
+  );
+  filter: blur(100px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Cinematic background gradient */
+.hero-cinematic-bg {
+  background: linear-gradient(
+    180deg,
+    var(--hero-bg-primary) 0%,
+    var(--hero-bg-secondary) 50%,
+    var(--hero-bg-primary) 100%
+  );
+}
+
+/* Smooth scroll Lenis body styles */
+html.lenis {
+  height: auto;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto;
+}
+
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+.lenis.lenis-scrolling iframe {
+  pointer-events: none;
+}
+
+/* GSAP scroll-triggered reveal animation base states */
+.gsap-reveal {
+  opacity: 0;
+  transform: translateY(20px) scale(0.96);
+  filter: blur(10px);
+}
+
+.gsap-reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
+}
+
+/* Letter animation container */
+.text-reveal-container {
+  overflow: hidden;
+  display: inline-block;
+}
+
+.text-reveal-container .char {
+  display: inline-block;
+  transform: translateY(100%);
+  opacity: 0;
+}
+
+.text-reveal-container.is-visible .char {
+  transform: translateY(0);
+  opacity: 1;
 }

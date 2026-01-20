@@ -87,9 +87,9 @@ export default function CreateManifoldPage() {
       ).unwrap();
 
       router.push(`/manifolds/${result.manifold._id}`);
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to create manifold:', error);
-      alert(error.message || 'Failed to create manifold');
+      alert(error instanceof Error ? error.message : 'Failed to create manifold');
     }
   };
 
@@ -333,7 +333,7 @@ export default function CreateManifoldPage() {
                       </Button>
                     </div>
                   ) : (
-                    devices.map((device: any) => (
+                    devices.map((device: { _id: string; name: string; mqttTopic: string; status: string }) => (
                       <div
                         key={device._id}
                         onClick={() =>
@@ -498,7 +498,7 @@ export default function CreateManifoldPage() {
                     <h3 className="font-semibold mb-3">ESP32 Device</h3>
                     <div className="text-sm">
                       <span className="font-medium">
-                        {devices.find((d: any) => d._id === formData.esp32DeviceId)
+                        {devices.find((d: { _id: string; name: string }) => d._id === formData.esp32DeviceId)
                           ?.name || 'Not selected'}
                       </span>
                     </div>

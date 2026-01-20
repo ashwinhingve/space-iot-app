@@ -1,11 +1,11 @@
 'use client'
 
 import { useMemo, useRef } from 'react'
-import { useThree, useFrame } from '@react-three/fiber'
+import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { NodeCluster } from './nodes/NodeCluster'
 import { BezierConnection, LineConnection } from './connections/BezierConnection'
-import { DataFlow, DataFlowBatch } from './connections/DataFlow'
+import { DataFlowBatch } from './connections/DataFlow'
 import { AmbientParticles, SparkleParticles } from './effects/AmbientParticles'
 import { generateNetwork, NetworkData } from './utils/networkGenerator'
 import { useOrbitScroll } from './hooks/useScrollCamera'
@@ -70,10 +70,10 @@ export function NetworkVisualization({
     lerpFactor: 0.05
   })
 
-  // Subtle rotation
+  // Subtle rotation - slow cinematic movement
   useFrame((state) => {
     if (!groupRef.current) return
-    groupRef.current.rotation.y = state.clock.elapsedTime * 0.05
+    groupRef.current.rotation.y = state.clock.elapsedTime * 0.015
   })
 
   const particleCount = quality === 'low' ? 50 : quality === 'medium' ? 100 : 150
@@ -81,10 +81,10 @@ export function NetworkVisualization({
 
   return (
     <group ref={groupRef}>
-      {/* Ambient lighting */}
+      {/* Ambient lighting - cinematic teal and purple */}
       <ambientLight intensity={0.3} />
-      <pointLight position={[10, 10, 10]} intensity={0.5} color="#00D9FF" />
-      <pointLight position={[-10, -10, -10]} intensity={0.3} color="#8b5cf6" />
+      <pointLight position={[10, 10, 10]} intensity={0.5} color="#5EEAD4" />
+      <pointLight position={[-10, -10, -10]} intensity={0.3} color="#8B5CF6" />
 
       {/* Nodes using instanced mesh for performance */}
       <NodeCluster
@@ -115,22 +115,22 @@ export function NetworkVisualization({
         )
       ))}
 
-      {/* Data flow particles on strong connections */}
+      {/* Data flow particles on strong connections - slow cinematic flow */}
       {showDataFlow && (
         <DataFlowBatch
           connections={strongConnections}
-          color="#00FFF0"
-          speed={0.4}
+          color="#5EEAD4"
+          speed={0.15}
         />
       )}
 
-      {/* Ambient particles */}
+      {/* Ambient particles - slow cinematic drift */}
       <AmbientParticles
         count={particleCount}
         radius={8}
-        color="#00D9FF"
+        color="#5EEAD4"
         size={0.02}
-        speed={0.15}
+        speed={0.06}
       />
 
       {/* Sparkle particles */}
@@ -138,7 +138,7 @@ export function NetworkVisualization({
         <SparkleParticles
           count={30}
           radius={6}
-          color="#00FFF0"
+          color="#5EEAD4"
           size={0.04}
         />
       )}

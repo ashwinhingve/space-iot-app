@@ -15,8 +15,8 @@ interface DataFlowProps {
 export function DataFlow({
   start,
   end,
-  color = '#00FFF0',
-  speed = 0.5,
+  color = '#5EEAD4',
+  speed = 0.15,
   particleCount = 3
 }: DataFlowProps) {
   const groupRef = useRef<THREE.Group>(null)
@@ -95,8 +95,8 @@ export function DataFlow({
 // Batch data flow for multiple connections
 export function DataFlowBatch({
   connections,
-  color = '#00FFF0',
-  speed = 0.5
+  color = '#5EEAD4',
+  speed = 0.15
 }: {
   connections: { start: THREE.Vector3; end: THREE.Vector3 }[]
   color?: string

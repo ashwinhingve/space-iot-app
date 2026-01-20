@@ -89,23 +89,23 @@ export default function ManifoldDetailPage() {
       socket.emit('requestManifoldStatus', manifoldId);
     });
 
-    socket.on('manifoldStatus', (data: any) => {
+    socket.on('manifoldStatus', (data: { valves?: Array<{ valveNumber: number; status: string }> }) => {
       console.log('Manifold status update:', data);
       dispatch(updateValveStatus(data));
 
       // Update local state for immediate UI feedback
       const newStates: { [key: number]: string } = {};
-      data.valves?.forEach((v: any) => {
+      data.valves?.forEach((v) => {
         newStates[v.valveNumber] = v.status;
       });
       setLocalValveStates(newStates);
     });
 
-    socket.on('commandAcknowledged', (data: any) => {
+    socket.on('commandAcknowledged', (data: { valveId: string; action: string }) => {
       console.log('Command acknowledged:', data);
     });
 
-    socket.on('manifoldOnline', (data: any) => {
+    socket.on('manifoldOnline', (data: { manifoldId: string; online: boolean }) => {
       console.log('Manifold online status:', data);
     });
 
@@ -188,7 +188,7 @@ export default function ManifoldDetailPage() {
     );
   }
 
-  const getValveStatus = (valve: any) => {
+  const getValveStatus = (valve: { valveNumber: number; operationalData: { currentStatus: string } }) => {
     return localValveStates[valve.valveNumber] || valve.operationalData.currentStatus;
   };
 

@@ -10,7 +10,6 @@ import {
   MonitorSmartphone,
   Command,
   Lock,
-  Cloud,
   Share2,
   HelpCircle,
   ChevronDown,
@@ -19,12 +18,8 @@ import {
   Copy,
   Check,
   Sparkles,
-  Code,
-  Cpu,
-  Zap,
   FileCode,
   GitBranch,
-  Database,
   Workflow,
   ExternalLink,
 } from 'lucide-react';
@@ -878,7 +873,7 @@ export default function DocumentationPage() {
                       color: 'text-emerald-500',
                       href: '#',
                     },
-                  ].map((resource, index) => (
+                  ].map((resource) => (
                     <motion.div
                       key={resource.title}
                       whileHover={{ y: -4, scale: 1.02 }}

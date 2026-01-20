@@ -14,8 +14,8 @@ let googleScriptLoaded = false;
 // Declare Google types
 interface GoogleAccounts {
   id: {
-    initialize: (config: any) => void;
-    renderButton: (parent: HTMLElement, options: any) => void;
+    initialize: (config: { client_id: string; callback: (response: { credential: string }) => void }) => void;
+    renderButton: (parent: HTMLElement, options: Record<string, unknown>) => void;
     disableAutoSelect: () => void;
   };
 }

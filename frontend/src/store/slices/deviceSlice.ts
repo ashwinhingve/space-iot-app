@@ -53,13 +53,26 @@ const initialState: DeviceState = {
   wifiSuccess: null,
 };
 
+// Helper to get token from localStorage or Redux state
+const getToken = (state: { auth: { token: string } }): string | null => {
+  // First try localStorage (more reliable on page load)
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('token');
+    if (token) return token;
+  }
+  // Fallback to Redux state
+  return state.auth.token;
+};
+
 export const fetchDevices = createAsyncThunk(
   'devices/fetchDevices',
   async (_, { getState }) => {
     const state = getState() as { auth: { token: string } };
+    const token = getToken(state);
+
     const response = await fetch(API_ENDPOINTS.DEVICES, {
       headers: {
-        Authorization: `Bearer ${state.auth.token}`,
+        Authorization: `Bearer ${token}`,
       },
     });
 
@@ -75,11 +88,12 @@ export const createDevice = createAsyncThunk(
   'devices/createDevice',
   async (deviceData: { name: string; type: string; mqttTopic: string }, { getState }) => {
     const state = getState() as { auth: { token: string } };
+    const token = getToken(state);
     const response = await fetch(API_ENDPOINTS.DEVICES, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${state.auth.token}`,
+        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(deviceData),
     });
@@ -96,11 +110,12 @@ export const controlDevice = createAsyncThunk(
   'devices/controlDevice',
   async ({ deviceId, value }: { deviceId: string; value: number }, { getState }) => {
     const state = getState() as { auth: { token: string } };
+    const token = getToken(state);
     const response = await fetch(API_ENDPOINTS.DEVICE_CONTROL(deviceId), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${state.auth.token}`,
+        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ value }),
     });
@@ -113,14 +128,40 @@ export const controlDevice = createAsyncThunk(
   }
 );
 
+export const updateDevice = createAsyncThunk(
+  'devices/updateDevice',
+  async (
+    { deviceId, data }: { deviceId: string; data: { name?: string; type?: string; mqttTopic?: string } },
+    { getState }
+  ) => {
+    const state = getState() as { auth: { token: string } };
+    const token = getToken(state);
+    const response = await fetch(API_ENDPOINTS.DEVICE_DETAIL(deviceId), {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to update device');
+    }
+
+    return response.json();
+  }
+);
+
 export const deleteDevice = createAsyncThunk(
   'devices/deleteDevice',
   async (deviceId: string, { getState }) => {
     const state = getState() as { auth: { token: string } };
+    const token = getToken(state);
     const response = await fetch(API_ENDPOINTS.DEVICE_DETAIL(deviceId), {
       method: 'DELETE',
       headers: {
-        Authorization: `Bearer ${state.auth.token}`,
+        Authorization: `Bearer ${token}`,
       },
     });
 
@@ -137,9 +178,10 @@ export const fetchWiFiConfigs = createAsyncThunk(
   'devices/fetchWiFiConfigs',
   async (_, { getState }) => {
     const state = getState() as { auth: { token: string } };
+    const token = getToken(state);
     const response = await fetch(API_ENDPOINTS.WIFI_CONFIG_LIST, {
       headers: {
-        Authorization: `Bearer ${state.auth.token}`,
+        Authorization: `Bearer ${token}`,
       },
     });
 
@@ -160,11 +202,12 @@ export const saveWiFiConfig = createAsyncThunk(
     { getState, rejectWithValue }
   ) => {
     const state = getState() as { auth: { token: string } };
+    const token = getToken(state);
     const response = await fetch(API_ENDPOINTS.WIFI_CONFIG, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${state.auth.token}`,
+        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(wifiData),
     });
@@ -190,10 +233,11 @@ export const deleteWiFiConfig = createAsyncThunk(
   'devices/deleteWiFiConfig',
   async (deviceId: string, { getState }) => {
     const state = getState() as { auth: { token: string } };
+    const token = getToken(state);
     const response = await fetch(API_ENDPOINTS.WIFI_CONFIG_DELETE(deviceId), {
       method: 'DELETE',
       headers: {
-        Authorization: `Bearer ${state.auth.token}`,
+        Authorization: `Bearer ${token}`,
       },
     });
 
@@ -325,12 +369,28 @@ const deviceSlice = createSlice({
       .addCase(controlDevice.rejected, (state, action) => {
         state.error = action.error.message || 'Failed to control device';
       })
+      // Update Device
+      .addCase(updateDevice.fulfilled, (state, action) => {
+        const index = state.devices.findIndex(d => d._id === action.payload._id);
+        if (index >= 0) {
+          state.devices[index] = { ...state.devices[index], ...action.payload };
+        }
+        if (state.selectedDevice && state.selectedDevice._id === action.payload._id) {
+          state.selectedDevice = { ...state.selectedDevice, ...action.payload };
+        }
+      })
+      .addCase(updateDevice.rejected, (state, action) => {
+        state.error = action.error.message || 'Failed to update device';
+      })
       // Delete Device
       .addCase(deleteDevice.fulfilled, (state, action) => {
         state.devices = state.devices.filter(device => device._id !== action.payload);
         if (state.selectedDevice && state.selectedDevice._id === action.payload) {
           state.selectedDevice = null;
         }
+      })
+      .addCase(deleteDevice.rejected, (state, action) => {
+        state.error = action.error.message || 'Failed to delete device';
       })
       // Fetch WiFi Configs
       .addCase(fetchWiFiConfigs.pending, (state) => {

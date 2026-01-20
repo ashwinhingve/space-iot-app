@@ -262,6 +262,7 @@ const ElectricValve: React.FC<{
   isOnline: boolean;
   onClick?: () => void;
   scale?: number;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 }> = ({ position, valveNumber, status, isOnline, onClick, scale = 1 }) => {
   const [hovered, setHovered] = useState(false);
   const statusColor = status === 'ON' ? COLORS.valveOn : status === 'FAULT' ? COLORS.valveFault : COLORS.valveOff;

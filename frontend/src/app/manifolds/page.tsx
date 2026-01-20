@@ -7,7 +7,7 @@ import { MainLayout } from '@/components/MainLayout';
 import { Button } from '@/components/ui/button';
 import { fetchManifolds, deleteManifold } from '@/store/slices/manifoldSlice';
 import { RootState, AppDispatch } from '@/store/store';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import AnimatedBackground from '@/components/AnimatedBackground';
 import {
   Plus,
@@ -39,7 +39,7 @@ type ManifoldType = {
   metadata: {
     totalCycles: number;
   };
-  esp32DeviceId: any;
+  esp32DeviceId: string | { status: string };
 };
 
 const statusConfig = {
@@ -200,7 +200,7 @@ export default function ManifoldsPage() {
                 }
               }}
             >
-              {manifolds.map((manifold: ManifoldType, index: number) => (
+              {manifolds.map((manifold: ManifoldType) => (
                 <motion.div
                   key={manifold._id}
                   variants={{

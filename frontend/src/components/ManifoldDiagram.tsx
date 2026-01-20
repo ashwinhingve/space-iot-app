@@ -70,13 +70,13 @@ export const ManifoldDiagram: React.FC<ManifoldDiagramProps> = ({
           {manifoldName}
         </text>
         <text x="400" y="50" textAnchor="middle" className="fill-muted-foreground text-xs">
-          MANIFOLD-27 | 4" Inlet → 4 Valves → 2" Outlets
+          MANIFOLD-27 | 4&quot; Inlet → 4 Valves → 2&quot; Outlets
         </text>
 
         {/* 4" Inlet Pipe */}
         <rect x="50" y="200" width="100" height="60" rx="4" className="fill-slate-400 stroke-slate-600" strokeWidth="2" />
         <text x="100" y="235" textAnchor="middle" className="fill-white text-xs font-semibold">
-          4" INLET
+          4&quot; INLET
         </text>
 
         {/* Inlet Flow Animation */}
@@ -223,7 +223,7 @@ export const ManifoldDiagram: React.FC<ManifoldDiagramProps> = ({
               {/* 2" Outlet */}
               <rect x="700" y={yPos - 10} width="50" height="20" rx="3" fill={color} stroke={strokeColor} strokeWidth="2" />
               <text x="725" y={yPos + 4} textAnchor="middle" className="fill-white text-xs font-semibold">
-                2" OUT
+                2&quot; OUT
               </text>
 
               {/* Mode Badge */}
@@ -294,7 +294,7 @@ export const ManifoldDiagram: React.FC<ManifoldDiagramProps> = ({
             Inlet Section
           </h4>
           <ul className="space-y-1 text-muted-foreground">
-            <li>• 4" Inlet with Butterfly Valve</li>
+            <li>• 4&quot; Inlet with Butterfly Valve</li>
             <li>• ARV (Air Release Valve)</li>
             <li>• SASF Sand Filter</li>
             <li>• PDPC Pressure Control</li>
@@ -307,7 +307,7 @@ export const ManifoldDiagram: React.FC<ManifoldDiagramProps> = ({
           </h4>
           <ul className="space-y-1 text-muted-foreground">
             <li>• 4 Solenoid Valves (ESP32 Controlled)</li>
-            <li>• Individual 2" Outlets</li>
+            <li>• Individual 2&quot; Outlets</li>
             <li>• AUTO/MANUAL Mode per Valve</li>
             <li>• Real-time Status Monitoring</li>
           </ul>
