@@ -59,8 +59,7 @@ const deviceSchema = new mongoose.Schema({
     }
   },
   settings: {
-    type: Map,
-    of: mongoose.Schema.Types.Mixed,
+    type: mongoose.Schema.Types.Mixed,
     default: {
       temperature: 0,
       humidity: 0,

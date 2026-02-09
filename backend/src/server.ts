@@ -1,5 +1,5 @@
 import express from 'express';
-import { createServer, createServer as createNetServer } from 'http';
+import { createServer } from 'http';
 import * as net from 'net';
 import { Server } from 'socket.io';
 import mongoose from 'mongoose';
@@ -15,21 +15,34 @@ import wifiRoutes from './routes/wifiRoutes';
 import manifoldRoutes from './routes/manifoldRoutes';
 import valveRoutes from './routes/valveRoutes';
 import componentRoutes from './routes/componentRoutes';
+import ttnRoutes from './routes/ttnRoutes';
+import ttnWebhookRoutes from './routes/ttnWebhookRoutes';
 import { Device } from './models/Device';
 import { Manifold } from './models/Manifold';
 import { Valve } from './models/Valve';
 import { ValveCommand } from './models/ValveCommand';
 
+// Import utilities and services
+import { validateEnv, getEnvConfig } from './utils/validateEnv';
+import { awsIotService, AwsIotConfig } from './services/awsIotService';
+import { ttnMqttService } from './services/ttnMqttService';
+
 // Load environment variables
 dotenv.config();
 
-console.log('Starting server...');
+// Validate environment variables before proceeding
+validateEnv();
+
+const config = getEnvConfig();
+const isProduction = config.isProduction;
+
+console.log(`Starting server in ${config.nodeEnv} mode...`);
 
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: config.frontendUrl || 'http://localhost:3000',
     methods: ['GET', 'POST']
   }
 });
@@ -37,60 +50,50 @@ const io = new Server(httpServer, {
 // Middleware - CORS configuration
 const corsOptions = {
   origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    // Allow requests with no origin (server-to-server, Postman, etc.)
     if (!origin) return callback(null, true);
-    const allowedOrigins = [
+
+    // Production allowed origins
+    const productionOrigins = [
+      'https://iot.spaceautotech.com',
+      'https://www.iot.spaceautotech.com',
+      'https://api.spaceautotech.com',
+      config.frontendUrl
+    ].filter(Boolean);
+
+    // Development allowed origins
+    const developmentOrigins = [
       'http://localhost:3000',
       'http://127.0.0.1:3000',
-      process.env.FRONTEND_URL
-    ];
-    if (origin.match(/^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}):3000$/)) {
+      config.frontendUrl
+    ].filter(Boolean);
+
+    const allowedOrigins = isProduction ? productionOrigins : [...productionOrigins, ...developmentOrigins];
+
+    // Allow local network IPs in development only
+    if (!isProduction && origin.match(/^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}):3000$/)) {
       return callback(null, true);
     }
+
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(null, true);
+      console.warn(`CORS blocked origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key']
 };
 
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// ============================================================
-// ===== AEDES MQTT BROKER =====
-// ============================================================
-
-const aedes = new Aedes();
-const mqttServer = net.createServer(aedes.handle);
-const MQTT_PORT = parseInt(process.env.MQTT_PORT || '1883', 10);
-
-mqttServer.listen(MQTT_PORT, '0.0.0.0', () => {
-  console.log(`MQTT Broker running on port ${MQTT_PORT}`);
-  console.log(`  - Local:   mqtt://localhost:${MQTT_PORT}`);
-  console.log(`  - Network: mqtt://0.0.0.0:${MQTT_PORT}`);
-});
-
-// Aedes broker events
-aedes.on('client', (client) => {
-  console.log(`MQTT Client Connected: ${client?.id || 'unknown'}`);
-});
-
-aedes.on('clientDisconnect', (client) => {
-  console.log(`MQTT Client Disconnected: ${client?.id || 'unknown'}`);
-});
-
-aedes.on('subscribe', (subscriptions, client) => {
-  console.log(`MQTT Client ${client?.id} subscribed to: ${subscriptions.map(s => s.topic).join(', ')}`);
-});
-
 // Keep track of devices and their last seen time
 const deviceHeartbeats = new Map<string, Date>();
 
-// MQTT message handler function - MUST be defined before aedes.on('publish')
+// MQTT message handler function - works with both Aedes and AWS IoT
 const handleMqttMessage = async (topic: string, message: Buffer) => {
   const topicParts = topic.split('/');
   const [prefix, deviceId, type] = topicParts;
@@ -146,12 +149,12 @@ const handleMqttMessage = async (topic: string, message: Buffer) => {
           let updatedDevice = await Device.findOneAndUpdate(
             { mqttTopic: `devices/${deviceId}` },
             {
-              status: 'online',
-              lastSeen: new Date(),
-              lastData: { timestamp: new Date(), value: temperature },
-              'settings.temperature': temperature,
-              'settings.humidity': humidity,
-              'settings.value': value
+              $set: {
+                status: 'online',
+                lastSeen: new Date(),
+                lastData: { timestamp: new Date(), value: temperature },
+                settings: { temperature, humidity, value }
+              }
             },
             { new: true }
           );
@@ -160,12 +163,12 @@ const handleMqttMessage = async (topic: string, message: Buffer) => {
             updatedDevice = await Device.findOneAndUpdate(
               { mqttTopic: { $regex: deviceId, $options: 'i' } },
               {
-                status: 'online',
-                lastSeen: new Date(),
-                lastData: { timestamp: new Date(), value: temperature },
-                'settings.temperature': temperature,
-                'settings.humidity': humidity,
-                'settings.value': value
+                $set: {
+                  status: 'online',
+                  lastSeen: new Date(),
+                  lastData: { timestamp: new Date(), value: temperature },
+                  settings: { temperature, humidity, value }
+                }
               },
               { new: true }
             );
@@ -230,47 +233,116 @@ const handleMqttMessage = async (topic: string, message: Buffer) => {
   }
 };
 
-// Handle ALL messages directly from the broker (no separate client needed)
-aedes.on('publish', async (packet, client) => {
-  const topic = packet.topic;
+// ============================================================
+// ===== MQTT SETUP (Conditional: Aedes for dev, AWS IoT for prod) =====
+// ============================================================
 
-  // Skip internal topics (start with $)
-  if (topic.startsWith('$')) return;
+let aedes: Aedes | null = null;
+let mqttServer: net.Server | null = null;
+let mqttClient: mqtt.MqttClient | null = null;
 
-  // Log external publishes
-  if (client) {
-    console.log(`MQTT Publish from ${client.id}: ${topic}`);
+async function setupMqtt() {
+  if (isProduction) {
+    // Production: Use AWS IoT Core
+    console.log('Setting up AWS IoT Core for production...');
+
+    const awsConfig: AwsIotConfig = {
+      endpoint: config.awsIotEndpoint!,
+      certPath: config.awsIotCertPath!,
+      keyPath: config.awsIotKeyPath!,
+      caPath: config.awsIotCaPath!,
+      clientId: `iotspace-backend-${Date.now()}`,
+      region: config.awsRegion!
+    };
+
+    await awsIotService.initialize(awsConfig, handleMqttMessage);
+
+    // Subscribe to device topics
+    await awsIotService.subscribe('devices/+/data');
+    await awsIotService.subscribe('devices/+/online');
+    await awsIotService.subscribe('manifolds/+/status');
+    await awsIotService.subscribe('manifolds/+/online');
+    await awsIotService.subscribe('manifolds/+/ack');
+
+    // Store AWS IoT service in app context for controllers
+    app.set('mqttClient', {
+      publish: (topic: string, message: string, options?: any, callback?: (err?: Error) => void) => {
+        awsIotService.publish(topic, message, options?.qos || 1)
+          .then(() => callback?.())
+          .catch((err) => callback?.(err));
+      },
+      connected: () => awsIotService.isConnected()
+    });
+
+    console.log('AWS IoT Core setup complete');
+
+  } else {
+    // Development: Use local Aedes broker
+    console.log('Setting up Aedes MQTT broker for development...');
+
+    aedes = new Aedes();
+    mqttServer = net.createServer(aedes.handle);
+
+    mqttServer.listen(config.mqttPort, '0.0.0.0', () => {
+      console.log(`MQTT Broker running on port ${config.mqttPort}`);
+      console.log(`  - Local:   mqtt://localhost:${config.mqttPort}`);
+      console.log(`  - Network: mqtt://0.0.0.0:${config.mqttPort}`);
+    });
+
+    // Aedes broker events
+    aedes.on('client', (client) => {
+      console.log(`MQTT Client Connected: ${client?.id || 'unknown'}`);
+    });
+
+    aedes.on('clientDisconnect', (client) => {
+      console.log(`MQTT Client Disconnected: ${client?.id || 'unknown'}`);
+    });
+
+    aedes.on('subscribe', (subscriptions, client) => {
+      console.log(`MQTT Client ${client?.id} subscribed to: ${subscriptions.map(s => s.topic).join(', ')}`);
+    });
+
+    // Handle ALL messages directly from the broker
+    aedes.on('publish', async (packet, client) => {
+      const topic = packet.topic;
+
+      // Skip internal topics (start with $)
+      if (topic.startsWith('$')) return;
+
+      // Log external publishes
+      if (client) {
+        console.log(`MQTT Publish from ${client.id}: ${topic}`);
+      }
+
+      // Process device and manifold messages
+      if (topic.startsWith('devices/') || topic.startsWith('manifolds/')) {
+        console.log(`>>> Calling handleMqttMessage for topic: ${topic}`);
+        try {
+          await handleMqttMessage(topic, packet.payload as Buffer);
+          console.log(`>>> handleMqttMessage completed for topic: ${topic}`);
+        } catch (err) {
+          console.error(`>>> handleMqttMessage ERROR:`, err);
+        }
+      }
+    });
+
+    // Create MQTT client for PUBLISHING only (to send commands to devices)
+    setTimeout(() => {
+      mqttClient = mqtt.connect(`mqtt://localhost:${config.mqttPort}`, {
+        reconnectPeriod: 1000,
+        connectTimeout: 5000,
+        clientId: 'backend-publisher'
+      });
+
+      mqttClient.on('connect', () => {
+        console.log('Backend MQTT publisher ready');
+      });
+
+      // Store MQTT client in app context for controllers to publish commands
+      app.set('mqttClient', mqttClient);
+    }, 500);
   }
-
-  // Process device and manifold messages
-  if (topic.startsWith('devices/') || topic.startsWith('manifolds/')) {
-    console.log(`>>> Calling handleMqttMessage for topic: ${topic}`);
-    try {
-      await handleMqttMessage(topic, packet.payload as Buffer);
-      console.log(`>>> handleMqttMessage completed for topic: ${topic}`);
-    } catch (err) {
-      console.error(`>>> handleMqttMessage ERROR:`, err);
-    }
-  }
-});
-
-// Create MQTT client for PUBLISHING only (to send commands to devices)
-let mqttClient: mqtt.MqttClient;
-
-setTimeout(() => {
-  mqttClient = mqtt.connect(`mqtt://localhost:${MQTT_PORT}`, {
-    reconnectPeriod: 1000,
-    connectTimeout: 5000,
-    clientId: 'backend-publisher'
-  });
-
-  mqttClient.on('connect', () => {
-    console.log('Backend MQTT publisher ready');
-  });
-
-  // Store MQTT client in app context for controllers to publish commands
-  app.set('mqttClient', mqttClient);
-}, 500);
+}
 
 // Function to handle when devices go offline
 const checkDevicesStatus = async () => {
@@ -324,6 +396,17 @@ io.on('connection', (socket) => {
     socket.leave(`manifold-${manifoldId}`);
   });
 
+  // TTN Socket.io rooms
+  socket.on('joinTTNApplication', (applicationId) => {
+    socket.join(`ttn-${applicationId}`);
+    console.log(`Socket joined TTN application room: ttn-${applicationId}`);
+  });
+
+  socket.on('leaveTTNApplication', (applicationId) => {
+    socket.leave(`ttn-${applicationId}`);
+    console.log(`Socket left TTN application room: ttn-${applicationId}`);
+  });
+
   socket.on('requestManifoldStatus', async (manifoldId) => {
     try {
       const manifold = await Manifold.findById(manifoldId);
@@ -350,40 +433,73 @@ io.on('connection', (socket) => {
 });
 
 // Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/iotspace')
+mongoose.connect(config.mongodbUri)
   .then(() => console.log('Connected to MongoDB'))
   .catch((err) => console.error('MongoDB connection error:', err));
 
-// Debug endpoint to list all devices with their MQTT topics
-app.get('/api/debug/devices', async (req, res) => {
-  try {
-    const devices = await Device.find({}, 'name mqttTopic status lastSeen');
-    res.json({
-      count: devices.length,
-      devices: devices.map(d => ({
-        id: d._id, name: d.name, mqttTopic: d.mqttTopic, status: d.status, lastSeen: d.lastSeen
-      }))
-    });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
+// ============================================================
+// ===== HEALTH CHECK ENDPOINT =====
+// ============================================================
+
+app.get('/api/health', async (req, res) => {
+  const mqttClientInstance = app.get('mqttClient');
+  const mqttConnected = isProduction
+    ? awsIotService.isConnected()
+    : (mqttClientInstance?.connected ?? false);
+
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    environment: config.nodeEnv,
+    services: {
+      database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+      mqtt: mqttConnected ? 'connected' : 'disconnected'
+    },
+    version: process.env.npm_package_version || '1.0.0'
+  });
 });
 
-// Debug endpoint to check database status
-app.get('/api/debug/db-status', async (req, res) => {
-  try {
-    const dbName = mongoose.connection.db.databaseName;
-    const collections = await mongoose.connection.db.listCollections().toArray();
-    const stats: any = { connected: mongoose.connection.readyState === 1, databaseName: dbName, collections: [] };
-    for (const col of collections) {
-      const count = await mongoose.connection.db.collection(col.name).countDocuments();
-      stats.collections.push({ name: col.name, count });
+// ============================================================
+// ===== DEBUG ENDPOINTS (Development Only) =====
+// ============================================================
+
+if (!isProduction) {
+  // Debug endpoint to list all devices with their MQTT topics
+  app.get('/api/debug/devices', async (req, res) => {
+    try {
+      const devices = await Device.find({}, 'name mqttTopic status lastSeen');
+      res.json({
+        count: devices.length,
+        devices: devices.map(d => ({
+          id: d._id, name: d.name, mqttTopic: d.mqttTopic, status: d.status, lastSeen: d.lastSeen
+        }))
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
-    res.json(stats);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
+  });
+
+  // Debug endpoint to check database status
+  app.get('/api/debug/db-status', async (req, res) => {
+    try {
+      const dbName = mongoose.connection.db.databaseName;
+      const collections = await mongoose.connection.db.listCollections().toArray();
+      const stats: any = { connected: mongoose.connection.readyState === 1, databaseName: dbName, collections: [] };
+      for (const col of collections) {
+        const count = await mongoose.connection.db.collection(col.name).countDocuments();
+        stats.collections.push({ name: col.name, count });
+      }
+      res.json(stats);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+} else {
+  // Return 404 for debug endpoints in production
+  app.get('/api/debug/*', (req, res) => {
+    res.status(404).json({ error: 'Not found' });
+  });
+}
 
 // Setup API routes
 app.use('/api/auth', authRoutes);
@@ -392,11 +508,93 @@ app.use('/api/device', wifiRoutes);
 app.use('/api/manifolds', manifoldRoutes);
 app.use('/api/valves', valveRoutes);
 app.use('/api/components', componentRoutes);
+app.use('/api/ttn', ttnRoutes);
+app.use('/api/ttn/webhook', ttnWebhookRoutes);
 
-const PORT = parseInt(process.env.PORT || '5000', 10);
+// ============================================================
+// ===== SERVER STARTUP =====
+// ============================================================
 
-httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`  - Local:   http://localhost:${PORT}`);
-  console.log(`  - Network: http://0.0.0.0:${PORT}`);
+async function startServer() {
+  // Initialize MQTT
+  await setupMqtt();
+
+  // Store Socket.io instance in app for webhook routes
+  app.set('io', io);
+
+  // Initialize TTN MQTT connection if credentials are configured
+  const ttnApiKey = process.env.TTN_API_KEY;
+  const ttnAppId = process.env.TTN_APPLICATION_ID;
+  const ttnRegion = process.env.TTN_REGION || 'eu1';
+
+  if (ttnApiKey && ttnAppId && ttnApiKey !== 'your-ttn-api-key-here') {
+    try {
+      ttnMqttService.setSocketIO(io);
+      await ttnMqttService.connect({
+        region: ttnRegion,
+        applicationId: ttnAppId,
+        apiKey: ttnApiKey,
+      });
+      console.log(`TTN MQTT connected for application: ${ttnAppId}`);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.warn(`TTN MQTT connection failed: ${errMsg}`);
+      console.warn('TTN uplinks will not be received. Check your TTN_API_KEY and TTN_APPLICATION_ID.');
+    }
+  } else {
+    console.log('TTN MQTT not configured (set TTN_API_KEY and TTN_APPLICATION_ID in .env)');
+  }
+
+  // Start HTTP server
+  httpServer.listen(config.port, '0.0.0.0', () => {
+    console.log(`Server running on port ${config.port}`);
+    console.log(`  - Local:   http://localhost:${config.port}`);
+    console.log(`  - Network: http://0.0.0.0:${config.port}`);
+    console.log(`  - Mode:    ${config.nodeEnv}`);
+  });
+}
+
+// Graceful shutdown handler
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, shutting down gracefully...');
+
+  // Close HTTP server
+  httpServer.close(() => {
+    console.log('HTTP server closed');
+  });
+
+  // Close TTN MQTT
+  ttnMqttService.disconnect();
+
+  // Close MQTT connections
+  if (isProduction) {
+    await awsIotService.disconnect();
+  } else {
+    if (mqttClient) {
+      mqttClient.end();
+    }
+    if (mqttServer) {
+      mqttServer.close();
+    }
+    if (aedes) {
+      aedes.close();
+    }
+  }
+
+  // Close MongoDB connection
+  await mongoose.connection.close();
+  console.log('MongoDB connection closed');
+
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('SIGINT received, shutting down...');
+  process.emit('SIGTERM', 'SIGTERM');
+});
+
+// Start the server
+startServer().catch((error) => {
+  console.error('Failed to start server:', error);
+  process.exit(1);
 });

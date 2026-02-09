@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+.next/
+out/
+build/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Certificates
+certs/
+*.pem
+*.crt
+*.key
+
+# Vercel
+.vercel
+
+# Large binary files
+*.pdf

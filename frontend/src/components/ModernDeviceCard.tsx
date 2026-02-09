@@ -533,7 +533,7 @@ const EditDeviceModal = ({ isOpen, onClose, device }: EditDeviceModalProps) => {
     try {
       await dispatch(updateDevice({ deviceId: device._id, data: { name, type, mqttTopic } })).unwrap();
       onClose();
-    } catch (err) {
+    } catch {
       setError('Failed to update device');
     } finally {
       setLoading(false);

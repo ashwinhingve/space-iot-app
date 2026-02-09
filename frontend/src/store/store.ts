@@ -3,6 +3,7 @@ import authReducer from './slices/authSlice';
 import deviceReducer from './slices/deviceSlice';
 import manifoldReducer from './slices/manifoldSlice';
 import dashboardReducer from './slices/dashboardSlice';
+import ttnReducer from './slices/ttnSlice';
 
 export const store = configureStore({
   reducer: {
@@ -10,6 +11,7 @@ export const store = configureStore({
     devices: deviceReducer,
     manifolds: manifoldReducer,
     dashboard: dashboardReducer,
+    ttn: ttnReducer,
   },
 });
 

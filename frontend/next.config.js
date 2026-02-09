@@ -6,13 +6,29 @@ const nextConfig = {
   // Transpile React Three Fiber packages for proper bundling
   transpilePackages: ['three', '@react-three/fiber', '@react-three/drei'],
 
-  // Fast refresh settings
-  onDemandEntries: {
-    maxInactiveAge: 25 * 1000,
-    pagesBufferLength: 2,
+  // Allow build to succeed even with TypeScript/ESLint warnings
+  typescript: {
+    ignoreBuildErrors: false,
+  },
+  eslint: {
+    ignoreDuringBuilds: false,
   },
 
-  // Security headers for Google Sign-In
+  // Image optimization
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'lh3.googleusercontent.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'api.spaceautotech.com',
+      },
+    ],
+  },
+
+  // Security headers
   async headers() {
     return [
       {
@@ -25,6 +41,18 @@ const nextConfig = {
           {
             key: 'Cross-Origin-Embedder-Policy',
             value: 'unsafe-none',
+          },
+          {
+            key: 'X-Frame-Options',
+            value: 'DENY',
+          },
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff',
+          },
+          {
+            key: 'Referrer-Policy',
+            value: 'strict-origin-when-cross-origin',
           },
         ],
       },

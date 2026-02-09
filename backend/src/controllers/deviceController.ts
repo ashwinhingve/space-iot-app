@@ -1,27 +1,23 @@
 import { Request, Response } from 'express';
 import { Device } from '../models/Device';
-import mqtt from 'mqtt';
-
-// MQTT client for publishing messages
-const mqttClient = mqtt.connect(process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883');
 
 export const createDevice = async (req: Request, res: Response) => {
   try {
     let { name, type, mqttTopic } = req.body;
-    
+
     // Validate the MQTT topic format
     if (!mqttTopic) {
       return res.status(400).json({ error: 'MQTT topic is required' });
     }
-    
+
     // If the topic doesn't already start with "devices/", add it
     if (!mqttTopic.startsWith('devices/')) {
       console.log(`Adding 'devices/' prefix to topic: ${mqttTopic}`);
       mqttTopic = `devices/${mqttTopic}`;
     }
-    
+
     console.log(`Creating device with name: ${name}, type: ${type}, topic: ${mqttTopic}`);
-    
+
     const device = new Device({
       name,
       type,
@@ -112,15 +108,28 @@ export const controlDevice = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Device not found' });
     }
 
+    // Get MQTT client from app context (works with both Aedes and AWS IoT)
+    const mqttClient = req.app.get('mqttClient');
+
+    if (!mqttClient) {
+      console.error('MQTT client not available');
+      return res.status(503).json({ error: 'MQTT service unavailable' });
+    }
+
     // Publish control message to MQTT
     mqttClient.publish(
       `${device.mqttTopic}/control`,
       JSON.stringify({ value }),
-      { qos: 1 }
+      { qos: 1 },
+      (err?: Error) => {
+        if (err) {
+          console.error('Error publishing MQTT message:', err);
+        }
+      }
     );
 
     res.json({ message: 'Control command sent successfully' });
   } catch (error) {
     res.status(500).json({ error: 'Error controlling device' });
   }
-}; 
+};

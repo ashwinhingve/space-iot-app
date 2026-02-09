@@ -2,5 +2,13 @@ node_modules/
 dist/
 .env
 .env.local
+.env.production
+.env.staging
 *.log
 .DS_Store
+
+# Certificates (should be stored securely, not in repo)
+certs/
+*.pem
+*.crt
+*.key

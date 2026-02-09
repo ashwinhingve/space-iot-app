@@ -1,5 +1,10 @@
 // API URLs and configuration
+// Production: https://api.spaceautotech.com
+// Development: http://localhost:5000
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+
+// Check if running in production
+export const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 // API Endpoints
 export const API_ENDPOINTS = {
@@ -47,6 +52,22 @@ export const API_ENDPOINTS = {
   COMPONENT_DETAIL: (id: string) => `${API_BASE_URL}/api/components/${id}`,
   COMPONENT_MAINTENANCE: (id: string) => `${API_BASE_URL}/api/components/${id}/maintenance`,
   COMPONENTS_BY_MANIFOLD: (manifoldId: string) => `${API_BASE_URL}/api/components/manifold/${manifoldId}`,
+
+  // TTN (The Things Network)
+  TTN_APPLICATIONS: `${API_BASE_URL}/api/ttn/applications`,
+  TTN_APPLICATION_DETAIL: (id: string) => `${API_BASE_URL}/api/ttn/applications/${id}`,
+  TTN_SYNC_DEVICES: (appId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/sync`,
+  TTN_DEVICES: (appId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/devices`,
+  TTN_DEVICE_DETAIL: (appId: string, deviceId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/devices/${deviceId}`,
+  TTN_UPLINKS: (appId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/uplinks`,
+  TTN_DEVICE_UPLINKS: (appId: string, deviceId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/devices/${deviceId}/uplinks`,
+  TTN_SEND_DOWNLINK: (appId: string, deviceId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/devices/${deviceId}/downlink`,
+  TTN_DOWNLINKS: (appId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/downlinks`,
+  TTN_DEVICE_DOWNLINKS: (appId: string, deviceId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/devices/${deviceId}/downlinks`,
+  TTN_GATEWAYS: (appId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/gateways`,
+  TTN_GATEWAY_DETAIL: (appId: string, gwId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/gateways/${gwId}`,
+  TTN_GATEWAY_STATS: (appId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/gateway-stats`,
+  TTN_STATS: (appId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/stats`,
 };
 
 // Socket.io Configuration

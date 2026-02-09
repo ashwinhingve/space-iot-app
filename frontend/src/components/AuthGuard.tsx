@@ -11,10 +11,16 @@ interface AuthGuardProps {
 }
 
 // Routes that require authentication
-const protectedRoutes = ['/dashboard', '/devices', '/manifolds', '/device'];
+const protectedRoutes = ['/dashboard', '/devices', '/manifolds', '/device', '/ttn'];
 
 // Routes that should redirect to dashboard if already authenticated
 const authRoutes = ['/login', '/register'];
+
+// Helper to check localStorage directly
+const getStoredToken = (): string | null => {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('token');
+};
 
 export function AuthGuard({ children }: AuthGuardProps) {
   const router = useRouter();
@@ -36,21 +42,23 @@ export function AuthGuard({ children }: AuthGuardProps) {
 
   // Verify token with backend when we have a token
   useEffect(() => {
-    if (isInitialized && token && !isAuthenticated && !loading) {
+    if (isInitialized && token && !loading) {
       dispatch(getCurrentUser());
     }
-  }, [token, isAuthenticated, loading, dispatch, isInitialized]);
+  }, [token, loading, dispatch, isInitialized]);
 
-  // Handle redirects
+  // Handle redirects - check localStorage directly to avoid race conditions
   useEffect(() => {
     if (!isInitialized) return;
 
+    const storedToken = getStoredToken();
+
     // Redirect to login if trying to access protected route without auth
-    if (isProtectedRoute && !isAuthenticated && !token && !loading) {
+    if (isProtectedRoute && !storedToken && !loading) {
       router.push(`/login?redirect=${encodeURIComponent(pathname || '/dashboard')}`);
     }
     // Redirect to dashboard if already authenticated and trying to access auth routes
-    else if (isAuthRoute && isAuthenticated) {
+    else if (isAuthRoute && storedToken) {
       router.push('/dashboard');
     }
   }, [isAuthenticated, isProtectedRoute, isAuthRoute, token, pathname, router, loading, isInitialized]);

@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -14,11 +47,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const http_1 = require("http");
+const net = __importStar(require("net"));
 const socket_io_1 = require("socket.io");
 const mongoose_1 = __importDefault(require("mongoose"));
 const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const mqtt_1 = __importDefault(require("mqtt"));
+const aedes_1 = __importDefault(require("aedes"));
 // Import routes and models
 const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
 const deviceRoutes_1 = __importDefault(require("./routes/deviceRoutes"));
@@ -42,82 +77,222 @@ const io = new socket_io_1.Server(httpServer, {
     }
 });
 // Middleware - CORS configuration
-// Allow requests from localhost and network IPs
+const isProduction = process.env.NODE_ENV === 'production';
 const corsOptions = {
     origin: (origin, callback) => {
-        // Allow requests with no origin (mobile apps, Postman, etc.)
+        // Allow requests with no origin (server-to-server, Postman, etc.)
         if (!origin)
             return callback(null, true);
-        // Allow localhost and any network IP on port 3000
-        const allowedOrigins = [
+        // Production allowed origins
+        const productionOrigins = [
+            'https://iot.spaceautotech.com',
+            'https://www.iot.spaceautotech.com',
+            'https://api.spaceautotech.com',
+            process.env.FRONTEND_URL
+        ].filter(Boolean);
+        // Development allowed origins
+        const developmentOrigins = [
             'http://localhost:3000',
             'http://127.0.0.1:3000',
             process.env.FRONTEND_URL
-        ];
-        // Allow any origin from local network (192.168.x.x, 10.x.x.x, etc.) on port 3000
-        if (origin.match(/^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}):3000$/)) {
+        ].filter(Boolean);
+        const allowedOrigins = isProduction ? productionOrigins : [...productionOrigins, ...developmentOrigins];
+        // Allow local network IPs in development only
+        if (!isProduction && origin.match(/^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}):3000$/)) {
             return callback(null, true);
         }
         if (allowedOrigins.includes(origin)) {
             callback(null, true);
         }
         else {
-            callback(null, true); // Allow all origins in development - change to false in production
+            console.warn(`CORS blocked origin: ${origin}`);
+            callback(new Error('Not allowed by CORS'));
         }
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key']
 };
 app.use((0, cors_1.default)(corsOptions));
 app.use(express_1.default.json());
-// Setup MQTT client
-const mqttClient = mqtt_1.default.connect(process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883');
-// Store MQTT client and Socket.io in app context for controllers
-app.set('mqttClient', mqttClient);
-app.set('io', io);
-mqttClient.on('connect', () => {
-    console.log('Connected to MQTT broker');
-    // Subscribe to all device data, status, and online topics
-    mqttClient.subscribe(['devices/+/data', 'devices/+/status', 'devices/+/online'], (err) => {
-        if (!err) {
-            console.log('Subscribed to device topics');
-        }
-        else {
-            console.error('Error subscribing to topics:', err);
-        }
-    });
-    // Subscribe to manifold topics
-    mqttClient.subscribe([
-        'manifolds/+/status', // Manifold valve status updates
-        'manifolds/+/online', // Manifold heartbeat
-        'manifolds/+/ack' // Command acknowledgments
-    ], (err) => {
-        if (!err) {
-            console.log('Subscribed to manifold topics');
-        }
-        else {
-            console.error('Error subscribing to manifold topics:', err);
-        }
-    });
+// ============================================================
+// ===== AEDES MQTT BROKER =====
+// ============================================================
+const aedes = new aedes_1.default();
+const mqttServer = net.createServer(aedes.handle);
+const MQTT_PORT = parseInt(process.env.MQTT_PORT || '1883', 10);
+mqttServer.listen(MQTT_PORT, '0.0.0.0', () => {
+    console.log(`MQTT Broker running on port ${MQTT_PORT}`);
+    console.log(`  - Local:   mqtt://localhost:${MQTT_PORT}`);
+    console.log(`  - Network: mqtt://0.0.0.0:${MQTT_PORT}`);
+});
+// Aedes broker events
+aedes.on('client', (client) => {
+    console.log(`MQTT Client Connected: ${(client === null || client === void 0 ? void 0 : client.id) || 'unknown'}`);
+});
+aedes.on('clientDisconnect', (client) => {
+    console.log(`MQTT Client Disconnected: ${(client === null || client === void 0 ? void 0 : client.id) || 'unknown'}`);
+});
+aedes.on('subscribe', (subscriptions, client) => {
+    console.log(`MQTT Client ${client === null || client === void 0 ? void 0 : client.id} subscribed to: ${subscriptions.map(s => s.topic).join(', ')}`);
 });
 // Keep track of devices and their last seen time
 const deviceHeartbeats = new Map();
+// MQTT message handler function - MUST be defined before aedes.on('publish')
+const handleMqttMessage = (topic, message) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f;
+    const topicParts = topic.split('/');
+    const [prefix, deviceId, type] = topicParts;
+    console.log(`MQTT message received on topic: ${topic}`);
+    console.log(`Topic parsed: prefix=${prefix}, deviceId=${deviceId}, type=${type}`);
+    try {
+        deviceHeartbeats.set(deviceId, new Date());
+        if (prefix === 'devices') {
+            if (type === 'online') {
+                const isOnline = message.toString() === 'true';
+                console.log(`Processing online status for device ${deviceId}: ${isOnline}`);
+                let updatedDevice = yield Device_1.Device.findOneAndUpdate({ mqttTopic: `devices/${deviceId}` }, { status: isOnline ? 'online' : 'offline', lastSeen: new Date() }, { new: true });
+                if (!updatedDevice) {
+                    updatedDevice = yield Device_1.Device.findOneAndUpdate({ mqttTopic: { $regex: deviceId, $options: 'i' } }, { status: isOnline ? 'online' : 'offline', lastSeen: new Date() }, { new: true });
+                }
+                if (updatedDevice) {
+                    console.log(`Updated device status: ${updatedDevice._id} -> ${updatedDevice.status}`);
+                    io.emit('deviceStatus', { deviceId: updatedDevice._id, status: updatedDevice.status });
+                }
+                else {
+                    const allDevices = yield Device_1.Device.find({}, 'mqttTopic');
+                    console.log(`No device found for: ${deviceId}. Available: ${allDevices.map(d => d.mqttTopic).join(', ')}`);
+                }
+            }
+            else if (type === 'data') {
+                try {
+                    const data = JSON.parse(message.toString());
+                    let temperature = 0, humidity = 0, value = 0;
+                    if (data.data) {
+                        temperature = (_a = data.data.temperature) !== null && _a !== void 0 ? _a : 0;
+                        humidity = (_b = data.data.humidity) !== null && _b !== void 0 ? _b : 0;
+                        value = (_c = data.data.value) !== null && _c !== void 0 ? _c : 0;
+                    }
+                    else {
+                        temperature = (_d = data.temperature) !== null && _d !== void 0 ? _d : 0;
+                        humidity = (_e = data.humidity) !== null && _e !== void 0 ? _e : 0;
+                        value = (_f = data.value) !== null && _f !== void 0 ? _f : 0;
+                    }
+                    console.log(`Processing data for ${deviceId}: temp=${temperature}, humidity=${humidity}`);
+                    let updatedDevice = yield Device_1.Device.findOneAndUpdate({ mqttTopic: `devices/${deviceId}` }, {
+                        status: 'online',
+                        lastSeen: new Date(),
+                        lastData: { timestamp: new Date(), value: temperature },
+                        'settings.temperature': temperature,
+                        'settings.humidity': humidity,
+                        'settings.value': value
+                    }, { new: true });
+                    if (!updatedDevice) {
+                        updatedDevice = yield Device_1.Device.findOneAndUpdate({ mqttTopic: { $regex: deviceId, $options: 'i' } }, {
+                            status: 'online',
+                            lastSeen: new Date(),
+                            lastData: { timestamp: new Date(), value: temperature },
+                            'settings.temperature': temperature,
+                            'settings.humidity': humidity,
+                            'settings.value': value
+                        }, { new: true });
+                    }
+                    if (updatedDevice) {
+                        console.log(`Updated device data: ${updatedDevice._id}`);
+                        io.emit('deviceData', {
+                            deviceId: updatedDevice._id,
+                            data: { temperature, humidity, value, timestamp: new Date() }
+                        });
+                    }
+                }
+                catch (err) {
+                    console.error('Error parsing device data:', err);
+                }
+            }
+        }
+        else if (prefix === 'manifolds') {
+            const manifoldId = deviceId;
+            console.log(`Processing manifold ${type} for ${manifoldId}`);
+            if (type === 'status') {
+                const statusData = JSON.parse(message.toString());
+                for (const valveData of statusData.valves || []) {
+                    const valve = yield Valve_1.Valve.findOneAndUpdate({ manifoldId: { $exists: true }, valveNumber: valveData.valveNumber }, { 'operationalData.currentStatus': valveData.status, updatedAt: new Date() }, { new: true });
+                    if (valve) {
+                        yield Manifold_1.Manifold.findByIdAndUpdate(valve.manifoldId, { updatedAt: new Date() });
+                    }
+                }
+                io.to(`manifold-${manifoldId}`).emit('manifoldStatus', {
+                    manifoldId,
+                    valves: statusData.valves,
+                    timestamp: statusData.timestamp || Date.now()
+                });
+            }
+            else if (type === 'online') {
+                const isOnline = message.toString() === 'true';
+                const manifold = yield Manifold_1.Manifold.findOneAndUpdate({ manifoldId }, { status: isOnline ? 'Active' : 'Offline', updatedAt: new Date() }, { new: true });
+                if (manifold) {
+                    io.to(`manifold-${manifoldId}`).emit('manifoldOnline', { manifoldId, isOnline, timestamp: new Date() });
+                }
+            }
+            else if (type === 'ack') {
+                const { commandId } = JSON.parse(message.toString());
+                const command = yield ValveCommand_1.ValveCommand.findOneAndUpdate({ commandId }, { status: 'ACKNOWLEDGED', acknowledgedAt: new Date() }, { new: true });
+                if (command) {
+                    io.to(`manifold-${manifoldId}`).emit('commandAcknowledged', { commandId, manifoldId, timestamp: new Date() });
+                }
+            }
+        }
+    }
+    catch (error) {
+        console.error('Error processing MQTT message:', error);
+    }
+});
+// Handle ALL messages directly from the broker (no separate client needed)
+aedes.on('publish', (packet, client) => __awaiter(void 0, void 0, void 0, function* () {
+    const topic = packet.topic;
+    // Skip internal topics (start with $)
+    if (topic.startsWith('$'))
+        return;
+    // Log external publishes
+    if (client) {
+        console.log(`MQTT Publish from ${client.id}: ${topic}`);
+    }
+    // Process device and manifold messages
+    if (topic.startsWith('devices/') || topic.startsWith('manifolds/')) {
+        console.log(`>>> Calling handleMqttMessage for topic: ${topic}`);
+        try {
+            yield handleMqttMessage(topic, packet.payload);
+            console.log(`>>> handleMqttMessage completed for topic: ${topic}`);
+        }
+        catch (err) {
+            console.error(`>>> handleMqttMessage ERROR:`, err);
+        }
+    }
+}));
+// Create MQTT client for PUBLISHING only (to send commands to devices)
+let mqttClient;
+setTimeout(() => {
+    mqttClient = mqtt_1.default.connect(`mqtt://localhost:${MQTT_PORT}`, {
+        reconnectPeriod: 1000,
+        connectTimeout: 5000,
+        clientId: 'backend-publisher'
+    });
+    mqttClient.on('connect', () => {
+        console.log('Backend MQTT publisher ready');
+    });
+    // Store MQTT client in app context for controllers to publish commands
+    app.set('mqttClient', mqttClient);
+}, 500);
 // Function to handle when devices go offline
 const checkDevicesStatus = () => __awaiter(void 0, void 0, void 0, function* () {
     const now = new Date();
     for (const [deviceId, lastSeen] of deviceHeartbeats.entries()) {
-        // If we haven't heard from a device in 15 seconds, mark it as offline (reduced from 30)
         if (now.getTime() - lastSeen.getTime() > 15000) {
             console.log(`Device ${deviceId} has timed out - marking as offline`);
             try {
                 const device = yield Device_1.Device.findOneAndUpdate({ mqttTopic: `devices/${deviceId}` }, { status: 'offline' }, { new: true });
                 if (device) {
-                    io.emit('deviceStatus', {
-                        deviceId: device._id,
-                        status: 'offline'
-                    });
-                    // Keep in heartbeats map but with updated timestamp to prevent rapid on/off switching
+                    io.emit('deviceStatus', { deviceId: device._id, status: 'offline' });
                     deviceHeartbeats.set(deviceId, new Date(now.getTime() - 14000));
                 }
             }
@@ -127,195 +302,7 @@ const checkDevicesStatus = () => __awaiter(void 0, void 0, void 0, function* () 
         }
     }
 });
-// Check device status more frequently for real-time updates
-setInterval(checkDevicesStatus, 5000); // Check every 5 seconds instead of 10
-mqttClient.on('message', (topic, message) => __awaiter(void 0, void 0, void 0, function* () {
-    const topicParts = topic.split('/');
-    const [prefix, deviceId, type] = topicParts;
-    console.log(`MQTT message received on topic: ${topic}, data: ${message.toString().substring(0, 100)}${message.toString().length > 100 ? '...' : ''}`);
-    // Debugging to show what we parsed from the topic
-    console.log(`Topic parsed: prefix=${prefix}, deviceId=${deviceId}, type=${type}`);
-    try {
-        // Update the last seen time for this device
-        deviceHeartbeats.set(deviceId, new Date());
-        if (type === 'online') {
-            // Handle online/offline status messages
-            const isOnline = message.toString() === 'true';
-            console.log(`Processing online status update for device ${deviceId}: ${isOnline}`);
-            // First try exact match
-            let updatedDevice = yield Device_1.Device.findOneAndUpdate({ mqttTopic: `devices/${deviceId}` }, {
-                status: isOnline ? 'online' : 'offline',
-                lastSeen: new Date()
-            }, { new: true });
-            // If device not found, try alternative topic formats
-            if (!updatedDevice) {
-                // Try with just the device ID
-                updatedDevice = yield Device_1.Device.findOneAndUpdate({ mqttTopic: deviceId }, {
-                    status: isOnline ? 'online' : 'offline',
-                    lastSeen: new Date()
-                }, { new: true });
-            }
-            if (updatedDevice) {
-                console.log(`Updated device status: ${updatedDevice._id} -> ${updatedDevice.status}`);
-                // Emit status update to connected clients
-                io.emit('deviceStatus', {
-                    deviceId: updatedDevice._id,
-                    status: updatedDevice.status
-                });
-            }
-            else {
-                console.log(`No device found with MQTT topic: devices/${deviceId} or ${deviceId}`);
-            }
-        }
-        else if (type === 'data') {
-            try {
-                const data = JSON.parse(message.toString());
-                // Extract sensor values - handle different data formats
-                let temperature = 0;
-                let humidity = 0;
-                let value = 0;
-                if (data.data) {
-                    // Format: { data: { temperature, humidity, value } }
-                    temperature = data.data.temperature !== undefined ? data.data.temperature : 0;
-                    humidity = data.data.humidity !== undefined ? data.data.humidity : 0;
-                    value = data.data.value !== undefined ? data.data.value : 0;
-                }
-                else {
-                    // Format: { temperature, humidity, value }
-                    temperature = data.temperature !== undefined ? data.temperature : 0;
-                    humidity = data.humidity !== undefined ? data.humidity : 0;
-                    value = data.value !== undefined ? data.value : 0;
-                }
-                console.log(`Processing data for device ${deviceId}: temp=${temperature}, humidity=${humidity}, value=${value}`);
-                // First try exact match
-                let updatedDevice = yield Device_1.Device.findOneAndUpdate({ mqttTopic: `devices/${deviceId}` }, {
-                    status: 'online',
-                    lastSeen: new Date(),
-                    lastData: {
-                        timestamp: new Date(),
-                        value: temperature // Use temperature as primary value
-                    },
-                    "settings.temperature": temperature,
-                    "settings.humidity": humidity,
-                    "settings.value": value
-                }, { new: true });
-                // If device not found, try alternative topic formats
-                if (!updatedDevice) {
-                    // Try with just the device ID
-                    updatedDevice = yield Device_1.Device.findOneAndUpdate({ mqttTopic: deviceId }, {
-                        status: 'online',
-                        lastSeen: new Date(),
-                        lastData: {
-                            timestamp: new Date(),
-                            value: temperature // Use temperature as primary value
-                        },
-                        "settings.temperature": temperature,
-                        "settings.humidity": humidity,
-                        "settings.value": value
-                    }, { new: true });
-                }
-                if (updatedDevice) {
-                    console.log(`Updated device data: ${updatedDevice._id}`);
-                    // Emit to Socket.io clients
-                    io.emit('deviceData', {
-                        deviceId: updatedDevice._id,
-                        data: {
-                            temperature,
-                            humidity,
-                            value,
-                            timestamp: new Date()
-                        }
-                    });
-                }
-                else {
-                    console.log(`Device not found for topic: devices/${deviceId} or ${deviceId}`);
-                }
-            }
-            catch (error) {
-                console.error('Error parsing device data:', error);
-            }
-        }
-    }
-    catch (error) {
-        console.error('Error processing MQTT message:', error);
-    }
-    // Handle manifold MQTT messages
-    if (prefix === 'manifolds') {
-        const manifoldId = deviceId; // Using deviceId variable which is actually manifoldId in this context
-        console.log(`Processing manifold message: ${type} for manifold ${manifoldId}`);
-        try {
-            if (type === 'status') {
-                // Manifold valve status update from ESP32
-                const statusData = JSON.parse(message.toString());
-                const { valves } = statusData;
-                // Update valve states in database
-                for (const valveData of valves) {
-                    yield Valve_1.Valve.findOneAndUpdate({
-                        manifoldId: { $exists: true },
-                        valveNumber: valveData.valveNumber
-                    }, {
-                        'operationalData.currentStatus': valveData.status,
-                        updatedAt: new Date()
-                    }, { new: true }).then((valve) => __awaiter(void 0, void 0, void 0, function* () {
-                        if (valve) {
-                            // Also update manifold last seen time
-                            yield Manifold_1.Manifold.findByIdAndUpdate(valve.manifoldId, {
-                                updatedAt: new Date()
-                            });
-                        }
-                    }));
-                }
-                // Emit to Socket.io clients in manifold room
-                io.to(`manifold-${manifoldId}`).emit('manifoldStatus', {
-                    manifoldId,
-                    valves,
-                    timestamp: statusData.timestamp || Date.now()
-                });
-                console.log(`Updated valve states for manifold ${manifoldId}`);
-            }
-            else if (type === 'ack') {
-                // Command acknowledgment from ESP32
-                const ackData = JSON.parse(message.toString());
-                const { commandId } = ackData;
-                // Mark command as acknowledged
-                const command = yield ValveCommand_1.ValveCommand.findOneAndUpdate({ commandId }, {
-                    status: 'ACKNOWLEDGED',
-                    acknowledgedAt: new Date()
-                }, { new: true });
-                if (command) {
-                    console.log(`Command ${commandId} acknowledged by ESP32`);
-                    // Emit acknowledgment to frontend
-                    io.to(`manifold-${manifoldId}`).emit('commandAcknowledged', {
-                        commandId,
-                        manifoldId,
-                        timestamp: new Date()
-                    });
-                }
-            }
-            else if (type === 'online') {
-                // Manifold heartbeat / online status
-                const isOnline = message.toString() === 'true';
-                // Update manifold status
-                const manifold = yield Manifold_1.Manifold.findOneAndUpdate({ manifoldId }, {
-                    status: isOnline ? 'Active' : 'Offline',
-                    updatedAt: new Date()
-                }, { new: true });
-                if (manifold) {
-                    console.log(`Manifold ${manifoldId} is now ${isOnline ? 'online' : 'offline'}`);
-                    // Emit to Socket.io clients
-                    io.to(`manifold-${manifoldId}`).emit('manifoldOnline', {
-                        manifoldId,
-                        isOnline,
-                        timestamp: new Date()
-                    });
-                }
-            }
-        }
-        catch (error) {
-            console.error(`Error processing manifold ${type} message:`, error);
-        }
-    }
-}));
+setInterval(checkDevicesStatus, 5000);
 // Socket.io connection
 io.on('connection', (socket) => {
     console.log('A user connected');
@@ -326,25 +313,18 @@ io.on('connection', (socket) => {
         try {
             const device = yield Device_1.Device.findById(deviceId);
             if (device) {
-                // Send the current device status to the client
-                socket.emit('deviceStatus', {
-                    deviceId: device._id,
-                    status: device.status
-                });
+                socket.emit('deviceStatus', { deviceId: device._id, status: device.status });
             }
         }
         catch (error) {
             console.error(`Error getting device status for ${deviceId}:`, error);
         }
     }));
-    // Manifold-specific Socket.io events
     socket.on('joinManifold', (manifoldId) => {
         socket.join(`manifold-${manifoldId}`);
-        console.log(`Socket joined manifold room: manifold-${manifoldId}`);
     });
     socket.on('leaveManifold', (manifoldId) => {
         socket.leave(`manifold-${manifoldId}`);
-        console.log(`Socket left manifold room: manifold-${manifoldId}`);
     });
     socket.on('requestManifoldStatus', (manifoldId) => __awaiter(void 0, void 0, void 0, function* () {
         try {
@@ -374,22 +354,30 @@ io.on('connection', (socket) => {
 mongoose_1.default.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/iotspace')
     .then(() => console.log('Connected to MongoDB'))
     .catch((err) => console.error('MongoDB connection error:', err));
+// Debug endpoint to list all devices with their MQTT topics
+app.get('/api/debug/devices', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const devices = yield Device_1.Device.find({}, 'name mqttTopic status lastSeen');
+        res.json({
+            count: devices.length,
+            devices: devices.map(d => ({
+                id: d._id, name: d.name, mqttTopic: d.mqttTopic, status: d.status, lastSeen: d.lastSeen
+            }))
+        });
+    }
+    catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+}));
 // Debug endpoint to check database status
 app.get('/api/debug/db-status', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const dbName = mongoose_1.default.connection.db.databaseName;
         const collections = yield mongoose_1.default.connection.db.listCollections().toArray();
-        const stats = {
-            connected: mongoose_1.default.connection.readyState === 1,
-            databaseName: dbName,
-            collections: []
-        };
+        const stats = { connected: mongoose_1.default.connection.readyState === 1, databaseName: dbName, collections: [] };
         for (const col of collections) {
             const count = yield mongoose_1.default.connection.db.collection(col.name).countDocuments();
-            stats.collections.push({
-                name: col.name,
-                count: count
-            });
+            stats.collections.push({ name: col.name, count });
         }
         res.json(stats);
     }
@@ -401,14 +389,12 @@ app.get('/api/debug/db-status', (req, res) => __awaiter(void 0, void 0, void 0, 
 app.use('/api/auth', authRoutes_1.default);
 app.use('/api/devices', deviceRoutes_1.default);
 app.use('/api/device', wifiRoutes_1.default);
-// Manifold system routes
 app.use('/api/manifolds', manifoldRoutes_1.default);
 app.use('/api/valves', valveRoutes_1.default);
 app.use('/api/components', componentRoutes_1.default);
 const PORT = parseInt(process.env.PORT || '5000', 10);
 httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
-    console.log(`Server accessible at:`);
     console.log(`  - Local:   http://localhost:${PORT}`);
     console.log(`  - Network: http://0.0.0.0:${PORT}`);
 });
