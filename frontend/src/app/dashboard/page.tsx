@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { io } from 'socket.io-client';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -29,19 +29,23 @@ import {
   WifiOff,
   RefreshCw,
   Download,
+  FileText,
   ExternalLink,
   Activity,
   Map,
   Zap,
   BarChart3,
-  FileText,
   Monitor,
   Droplets,
   ChevronRight,
+  ChevronDown,
+  HeartPulse,
+  Eye,
+  Sparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-// Report sub-items for the Reports card
+// ─── Report sub-items ────────────────────────────────────────
 const REPORT_SUBITEMS = [
   { label: 'Pump Reports', icon: Droplets },
   { label: 'Electrical Reports', icon: Zap },
@@ -49,7 +53,7 @@ const REPORT_SUBITEMS = [
   { label: 'RSSI Reports', icon: Wifi },
 ];
 
-// Project overview subsystem definitions
+// ─── Project overview subsystem definitions ──────────────────
 const PROJECT_SUBSYSTEMS = [
   {
     title: 'Pump House SCADA',
@@ -95,7 +99,7 @@ const PROJECT_SUBSYSTEMS = [
 
 type DateRange = '7d' | '30d' | '90d';
 
-// SVG circular progress ring - defined outside component to avoid re-renders
+// ─── Circular Progress Ring ──────────────────────────────────
 function CircularProgress({ percent, color }: { percent: number; color: string }) {
   const radius = 28;
   const circumference = 2 * Math.PI * radius;
@@ -115,17 +119,43 @@ function CircularProgress({ percent, color }: { percent: number; color: string }
   );
 }
 
+// ─── PDF Export Helper ───────────────────────────────────────
+function generatePDFContent(labels: string[], connected: number[], disconnected: number[], dateRange: string): string {
+  const rows = labels.map((label, i) =>
+    `${label},${connected[i]},${disconnected[i]}`
+  ).join('\n');
+
+  // Simple text-based report (actual PDF would need a library like jspdf)
+  return `IoT Space - Device Connection Report
+Generated: ${new Date().toLocaleString()}
+Date Range: ${dateRange}
+${'='.repeat(50)}
+
+Date,Connected,Disconnected
+${rows}
+
+${'='.repeat(50)}
+Total Records: ${labels.length}
+`;
+}
+
+// ═════════════════════════════════════════════════════════════
+// ═════ DASHBOARD PAGE ═══════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
 export default function DashboardPage() {
   const dispatch = useDispatch<AppDispatch>();
   const router = useRouter();
   const [isConnected, setIsConnected] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange>('7d');
+  const [showProjectOverview, setShowProjectOverview] = useState(false);
+  const projectOverviewRef = useRef<HTMLDivElement>(null);
 
   const { stats, analytics, systemHealth, alerts, recentActivity } = useSelector(
     (state: RootState) => state.dashboard
   );
 
+  // ─── Data fetching ─────────────────────────────────────────
   const fetchAllData = useCallback(async () => {
     setIsRefreshing(true);
     await Promise.all([
@@ -141,28 +171,23 @@ export default function DashboardPage() {
     fetchAllData();
   }, [fetchAllData]);
 
+  // ─── Socket.io connection ──────────────────────────────────
   useEffect(() => {
     const newSocket = io(SOCKET_CONFIG.URL, SOCKET_CONFIG.OPTIONS);
 
     newSocket.on('connect', () => {
-      console.log('Dashboard connected to Socket.io');
       setIsConnected(true);
       dispatch(updateSystemHealth({ network: 'excellent' }));
     });
 
     newSocket.on('disconnect', () => {
-      console.log('Dashboard disconnected from Socket.io');
       setIsConnected(false);
       dispatch(updateSystemHealth({ network: 'poor' }));
     });
 
     newSocket.on('deviceData', (data: { deviceId: string; data: Record<string, unknown> }) => {
       dispatch(updateDeviceData({ deviceId: data.deviceId, data: data.data }));
-      dispatch(addActivity({
-        action: 'Data received',
-        device: data.deviceId,
-        status: 'success',
-      }));
+      dispatch(addActivity({ action: 'Data received', device: data.deviceId, status: 'success' }));
     });
 
     newSocket.on('deviceStatus', (data: { deviceId: string; status: string }) => {
@@ -190,15 +215,16 @@ export default function DashboardPage() {
     };
   }, [dispatch]);
 
+  // ─── Auto-refresh every 30s ────────────────────────────────
   useEffect(() => {
     const refreshInterval = setInterval(() => {
       dispatch(fetchDashboardStats());
       dispatch(fetchAlerts());
     }, 30000);
-
     return () => clearInterval(refreshInterval);
   }, [dispatch]);
 
+  // ─── Handlers ──────────────────────────────────────────────
   const handleAcknowledgeAlert = (alertId: string) => {
     dispatch(acknowledgeAlert(alertId));
   };
@@ -207,12 +233,24 @@ export default function DashboardPage() {
     fetchAllData();
   };
 
-  // Device stats calculations
+  const handleToggleProjectOverview = () => {
+    setShowProjectOverview((prev) => {
+      const next = !prev;
+      if (next) {
+        setTimeout(() => {
+          projectOverviewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
+      }
+      return next;
+    });
+  };
+
+  // ─── Device stats ──────────────────────────────────────────
   const totalDevices = stats.devicesOnline + stats.devicesOffline;
   const connectedPercent = totalDevices > 0 ? Math.round((stats.devicesOnline / totalDevices) * 100) : 0;
   const disconnectedPercent = totalDevices > 0 ? 100 - connectedPercent : 0;
 
-  // Connection status chart data - filtered by date range
+  // ─── Connection chart data ─────────────────────────────────
   const connectionChartData = useMemo(() => {
     const activity = analytics?.deviceActivity;
     if (!activity) {
@@ -241,7 +279,7 @@ export default function DashboardPage() {
     };
   }, [analytics, dateRange, connectedPercent]);
 
-  // CSV export handler
+  // ─── CSV Export ────────────────────────────────────────────
   const handleExportCSV = () => {
     const headers = ['Date', 'Connected', 'Disconnected'];
     const rows = connectionChartData.labels.map((label, i) => [
@@ -254,7 +292,24 @@ export default function DashboardPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `connection-status-${dateRange}-${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = `iot-connection-report-${dateRange}-${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // ─── PDF Export ────────────────────────────────────────────
+  const handleExportPDF = () => {
+    const content = generatePDFContent(
+      connectionChartData.labels,
+      connectionChartData.datasets[0].data,
+      connectionChartData.datasets[1].data,
+      dateRange
+    );
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `iot-connection-report-${dateRange}-${new Date().toISOString().split('T')[0]}.txt`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -264,6 +319,9 @@ export default function DashboardPage() {
     data: [0, 0, 0, 0, 0, 0, 0],
   };
 
+  // ═════════════════════════════════════════════════════════
+  // ═════ RENDER ═══════════════════════════════════════════
+  // ═════════════════════════════════════════════════════════
   return (
     <MainLayout>
       <div className="relative min-h-screen">
@@ -271,12 +329,14 @@ export default function DashboardPage() {
 
         <div className="relative z-10 container mx-auto px-4 py-6 md:py-8 max-w-7xl">
 
-          {/* ===== HEADER with Logos + Project Name ===== */}
+          {/* ══════════════════════════════════════════════════
+              1. HEADER — Logos + Project Name + Status
+              ══════════════════════════════════════════════════ */}
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6"
+            className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8"
           >
             <div className="flex items-center gap-4">
               {/* Department Logo */}
@@ -286,8 +346,8 @@ export default function DashboardPage() {
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.1 }}
               >
-                <div className="w-12 h-12 rounded-xl overflow-hidden border border-border/50 shadow-lg">
-                  <Image src="/logo-dept.svg" alt="Department Logo" width={48} height={48} className="w-full h-full object-cover" />
+                <div className="w-14 h-14 rounded-xl overflow-hidden border border-border/50 shadow-lg bg-background/50 backdrop-blur-sm">
+                  <Image src="/logo-dept.svg" alt="Department Logo" width={56} height={56} className="w-full h-full object-cover" />
                 </div>
               </motion.div>
 
@@ -308,8 +368,8 @@ export default function DashboardPage() {
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.15 }}
               >
-                <div className="w-12 h-12 rounded-xl overflow-hidden border border-border/50 shadow-lg">
-                  <Image src="/logo-sat.svg" alt="Space Auto Tech Logo" width={48} height={48} className="w-full h-full object-cover" />
+                <div className="w-14 h-14 rounded-xl overflow-hidden border border-border/50 shadow-lg bg-background/50 backdrop-blur-sm">
+                  <Image src="/logo-sat.svg" alt="Space Auto Tech Logo" width={56} height={56} className="w-full h-full object-cover" />
                 </div>
               </motion.div>
             </div>
@@ -320,7 +380,7 @@ export default function DashboardPage() {
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.3 }}
             >
-              {/* Connection Status */}
+              {/* Connection Status Pill */}
               <motion.div
                 className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium backdrop-blur-sm border transition-all duration-300 ${
                   isConnected
@@ -335,7 +395,7 @@ export default function DashboardPage() {
                 {isConnected ? 'Live' : 'Offline'}
               </motion.div>
 
-              {/* Refresh Button */}
+              {/* Refresh */}
               <Button
                 variant="outline"
                 size="sm"
@@ -349,70 +409,133 @@ export default function DashboardPage() {
             </motion.div>
           </motion.div>
 
-          {/* ===== PROJECT OVERVIEW - Always Visible ===== */}
+          {/* ══════════════════════════════════════════════════
+              2. SYSTEM HEALTH — Clickable to open /devices
+              Shows Total, Connected %, Disconnected %
+              ══════════════════════════════════════════════════ */}
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.15, duration: 0.5 }}
             className="mb-8"
           >
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-              Project Overview
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
-              {/* SCADA, Map, SLD, OMS cards */}
-              {PROJECT_SUBSYSTEMS.map((subsystem, index) => (
-                <motion.div
-                  key={subsystem.href}
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.2 + index * 0.05, duration: 0.3 }}
-                >
-                  <Link href={subsystem.href}>
-                    <div className={`
-                      relative overflow-hidden rounded-xl p-4
-                      bg-gradient-to-br ${subsystem.color}
-                      border ${subsystem.borderColor}
-                      backdrop-blur-xl
-                      hover:scale-[1.03] hover:shadow-lg
-                      transition-all duration-300 cursor-pointer
-                      group h-full
-                    `}>
-                      <div className="absolute -top-6 -right-6 w-20 h-20 bg-gradient-to-br from-white/5 to-transparent rounded-full blur-2xl" />
-                      <div className="relative z-10">
-                        <div className={`inline-flex p-2 rounded-lg ${subsystem.iconBg} mb-2`}>
-                          <subsystem.icon className={`h-5 w-5 ${subsystem.iconColor}`} />
+            <div className="flex items-center gap-2 mb-4">
+              <HeartPulse className="h-5 w-5 text-brand-500" />
+              <h2 className="text-lg font-semibold text-foreground">System Health</h2>
+              <span className="text-xs text-muted-foreground ml-1">- Click cards for device details</span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Total Devices — Opens device list */}
+              <motion.div
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                <Link href="/devices">
+                  <div className="relative overflow-hidden rounded-2xl p-6 bg-gradient-to-br from-blue-500/20 to-blue-600/10 border border-blue-500/30 backdrop-blur-xl shadow-lg shadow-blue-500/10 hover:shadow-xl transition-all duration-300 cursor-pointer group">
+                    <div className="absolute -top-12 -right-12 w-32 h-32 bg-gradient-to-br from-white/5 to-transparent rounded-full blur-2xl" />
+                    <div className="relative z-10">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="p-3 rounded-xl bg-blue-500/20 text-blue-400">
+                          <Activity className="h-6 w-6" />
                         </div>
-                        <h3 className="font-semibold text-foreground text-sm mb-0.5">{subsystem.title}</h3>
-                        <p className="text-xs text-muted-foreground leading-relaxed">{subsystem.description}</p>
-                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground mt-2 opacity-0 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
+                        <ExternalLink className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      <p className="text-sm font-medium text-muted-foreground">Total Devices</p>
+                      <motion.p
+                        className="text-4xl font-bold text-foreground mt-1"
+                        initial={{ opacity: 0, scale: 0.5 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ duration: 0.5, delay: 0.4 }}
+                      >
+                        {totalDevices}
+                      </motion.p>
+                      <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1 group-hover:text-brand-400 transition-colors">
+                        View all devices <ExternalLink className="h-3 w-3" />
+                      </p>
+                    </div>
+                  </div>
+                </Link>
+              </motion.div>
+
+              {/* Connected Devices — % + count + status */}
+              <motion.div
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                <Link href="/devices">
+                  <div className="relative overflow-hidden rounded-2xl p-6 bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 border border-emerald-500/30 backdrop-blur-xl shadow-lg shadow-emerald-500/10 hover:shadow-xl transition-all duration-300 cursor-pointer group">
+                    <div className="absolute -top-12 -right-12 w-32 h-32 bg-gradient-to-br from-white/5 to-transparent rounded-full blur-2xl" />
+                    <div className="relative z-10 flex items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="p-2 rounded-lg bg-emerald-500/20">
+                            <Wifi className="h-4 w-4 text-emerald-400" />
+                          </div>
+                          <span className="text-sm font-medium text-muted-foreground">Connected</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                            ONLINE
+                          </span>
+                        </div>
+                        <motion.p
+                          className="text-3xl font-bold text-emerald-400"
+                          initial={{ opacity: 0, scale: 0.5 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ duration: 0.5, delay: 0.5 }}
+                        >
+                          {connectedPercent}%
+                        </motion.p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {stats.devicesOnline} of {totalDevices} devices online
+                        </p>
+                      </div>
+                      <div className="relative">
+                        <CircularProgress percent={connectedPercent} color="#10b981" />
+                        <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-emerald-400">
+                          {stats.devicesOnline}
+                        </span>
                       </div>
                     </div>
-                  </Link>
-                </motion.div>
-              ))}
+                  </div>
+                </Link>
+              </motion.div>
 
-              {/* Reports card - with sub-items visible */}
+              {/* Disconnected Devices — % + count + status */}
               <motion.div
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.4, duration: 0.3 }}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
               >
-                <Link href="/reports">
-                  <div className="relative overflow-hidden rounded-xl p-4 bg-gradient-to-br from-cyan-500/20 to-cyan-600/10 border border-cyan-500/30 backdrop-blur-xl hover:scale-[1.03] hover:shadow-lg transition-all duration-300 cursor-pointer group h-full">
-                    <div className="absolute -top-6 -right-6 w-20 h-20 bg-gradient-to-br from-white/5 to-transparent rounded-full blur-2xl" />
-                    <div className="relative z-10">
-                      <div className="inline-flex p-2 rounded-lg bg-cyan-500/20 mb-2">
-                        <FileText className="h-5 w-5 text-cyan-400" />
-                      </div>
-                      <h3 className="font-semibold text-foreground text-sm mb-1.5">Reports</h3>
-                      <div className="space-y-1">
-                        {REPORT_SUBITEMS.map((item) => (
-                          <div key={item.label} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                            <item.icon className="h-3 w-3 flex-shrink-0" />
-                            <span>{item.label}</span>
+                <Link href="/devices">
+                  <div className="relative overflow-hidden rounded-2xl p-6 bg-gradient-to-br from-red-500/15 to-red-600/5 border border-red-500/25 backdrop-blur-xl shadow-lg shadow-red-500/10 hover:shadow-xl transition-all duration-300 cursor-pointer group">
+                    <div className="absolute -top-12 -right-12 w-32 h-32 bg-gradient-to-br from-white/5 to-transparent rounded-full blur-2xl" />
+                    <div className="relative z-10 flex items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="p-2 rounded-lg bg-red-500/20">
+                            <WifiOff className="h-4 w-4 text-red-400" />
                           </div>
-                        ))}
+                          <span className="text-sm font-medium text-muted-foreground">Disconnected</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-500/20 text-red-400 border border-red-500/30">
+                            OFFLINE
+                          </span>
+                        </div>
+                        <motion.p
+                          className="text-3xl font-bold text-red-400"
+                          initial={{ opacity: 0, scale: 0.5 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ duration: 0.5, delay: 0.6 }}
+                        >
+                          {disconnectedPercent}%
+                        </motion.p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {stats.devicesOffline} of {totalDevices} devices offline
+                        </p>
+                      </div>
+                      <div className="relative">
+                        <CircularProgress percent={disconnectedPercent} color="#ef4444" />
+                        <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-red-400">
+                          {stats.devicesOffline}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -421,147 +544,23 @@ export default function DashboardPage() {
             </div>
           </motion.div>
 
-          {/* ===== DEVICE OVERVIEW STATS ===== */}
+          {/* ══════════════════════════════════════════════════
+              3. CONNECTION GRAPH — Date filter + CSV/PDF export
+              ══════════════════════════════════════════════════ */}
           <motion.div
-            className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8"
-            initial="hidden"
-            animate="visible"
-            variants={{
-              hidden: { opacity: 0 },
-              visible: {
-                opacity: 1,
-                transition: { staggerChildren: 0.1, delayChildren: 0.3 }
-              }
-            }}
+            className="mb-8"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3, duration: 0.5 }}
           >
-            {/* Total Devices */}
-            <motion.div
-              variants={{
-                hidden: { opacity: 0, y: 20, scale: 0.95 },
-                visible: { opacity: 1, y: 0, scale: 1 }
-              }}
-              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-            >
-              <Link href="/devices">
-                <div className="relative overflow-hidden rounded-2xl p-6 bg-gradient-to-br from-blue-500/20 to-blue-600/10 border border-blue-500/30 backdrop-blur-xl shadow-lg shadow-blue-500/10 hover:scale-[1.02] hover:shadow-xl transition-all duration-300 cursor-pointer group">
-                  <div className="absolute -top-12 -right-12 w-32 h-32 bg-gradient-to-br from-white/5 to-transparent rounded-full blur-2xl" />
-                  <div className="relative z-10">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="p-3 rounded-xl bg-blue-500/20 text-blue-400">
-                        <Activity className="h-6 w-6" />
-                      </div>
-                      <ExternalLink className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </div>
-                    <p className="text-sm font-medium text-muted-foreground">Total Devices</p>
-                    <motion.p
-                      className="text-4xl font-bold text-foreground mt-1"
-                      initial={{ opacity: 0, scale: 0.5 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ duration: 0.5, delay: 0.4 }}
-                    >
-                      {totalDevices}
-                    </motion.p>
-                    <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                      View all devices <ExternalLink className="h-3 w-3" />
-                    </p>
-                  </div>
-                </div>
-              </Link>
-            </motion.div>
-
-            {/* Connected Devices */}
-            <motion.div
-              variants={{
-                hidden: { opacity: 0, y: 20, scale: 0.95 },
-                visible: { opacity: 1, y: 0, scale: 1 }
-              }}
-              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-            >
-              <div className="relative overflow-hidden rounded-2xl p-6 bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 border border-emerald-500/30 backdrop-blur-xl shadow-lg shadow-emerald-500/10">
-                <div className="absolute -top-12 -right-12 w-32 h-32 bg-gradient-to-br from-white/5 to-transparent rounded-full blur-2xl" />
-                <div className="relative z-10 flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="p-2 rounded-lg bg-emerald-500/20">
-                        <Wifi className="h-4 w-4 text-emerald-400" />
-                      </div>
-                      <span className="text-sm font-medium text-muted-foreground">Connected</span>
-                    </div>
-                    <motion.p
-                      className="text-3xl font-bold text-emerald-400"
-                      initial={{ opacity: 0, scale: 0.5 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ duration: 0.5, delay: 0.5 }}
-                    >
-                      {connectedPercent}%
-                    </motion.p>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {stats.devicesOnline} of {totalDevices} devices online
-                    </p>
-                  </div>
-                  <div className="relative">
-                    <CircularProgress percent={connectedPercent} color="#10b981" />
-                    <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-emerald-400">
-                      {stats.devicesOnline}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-
-            {/* Disconnected Devices */}
-            <motion.div
-              variants={{
-                hidden: { opacity: 0, y: 20, scale: 0.95 },
-                visible: { opacity: 1, y: 0, scale: 1 }
-              }}
-              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-            >
-              <div className="relative overflow-hidden rounded-2xl p-6 bg-gradient-to-br from-red-500/15 to-red-600/5 border border-red-500/25 backdrop-blur-xl shadow-lg shadow-red-500/10">
-                <div className="absolute -top-12 -right-12 w-32 h-32 bg-gradient-to-br from-white/5 to-transparent rounded-full blur-2xl" />
-                <div className="relative z-10 flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="p-2 rounded-lg bg-red-500/20">
-                        <WifiOff className="h-4 w-4 text-red-400" />
-                      </div>
-                      <span className="text-sm font-medium text-muted-foreground">Disconnected</span>
-                    </div>
-                    <motion.p
-                      className="text-3xl font-bold text-red-400"
-                      initial={{ opacity: 0, scale: 0.5 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ duration: 0.5, delay: 0.6 }}
-                    >
-                      {disconnectedPercent}%
-                    </motion.p>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {stats.devicesOffline} of {totalDevices} devices offline
-                    </p>
-                  </div>
-                  <div className="relative">
-                    <CircularProgress percent={disconnectedPercent} color="#ef4444" />
-                    <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-red-400">
-                      {stats.devicesOffline}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-
-          {/* ===== MAIN CONTENT GRID ===== */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-            {/* Left Column - Charts */}
-            <motion.div
-              className="lg:col-span-2 space-y-6"
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.5, duration: 0.5 }}
-            >
-              {/* Connection Status Chart with date filter + export */}
-              <div className="space-y-0">
-                <div className="flex items-center justify-end gap-2 mb-2">
+            <div className="space-y-0">
+              {/* Date Range Filter + Export Buttons */}
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                  Connection Status
+                </h3>
+                <div className="flex items-center gap-2">
+                  {/* Date Range Buttons */}
                   {(['7d', '30d', '90d'] as DateRange[]).map((range) => (
                     <button
                       key={range}
@@ -572,29 +571,183 @@ export default function DashboardPage() {
                           : 'bg-muted/30 text-muted-foreground hover:bg-muted/50 border border-transparent'
                       }`}
                     >
-                      {range}
+                      {range === '7d' ? '7 Days' : range === '30d' ? '30 Days' : '90 Days'}
                     </button>
                   ))}
+
+                  <div className="w-px h-5 bg-border/50 mx-1" />
+
+                  {/* CSV Download */}
                   <button
                     onClick={handleExportCSV}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-muted/30 text-muted-foreground hover:bg-muted/50 hover:text-foreground border border-transparent transition-all duration-200"
-                    title="Export as CSV"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 transition-all duration-200"
+                    title="Download CSV Report"
                   >
                     <Download className="h-3.5 w-3.5" />
                     CSV
                   </button>
+
+                  {/* PDF Download */}
+                  <button
+                    onClick={handleExportPDF}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 border border-blue-500/20 transition-all duration-200"
+                    title="Download PDF Report"
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                    PDF
+                  </button>
                 </div>
-                <AnalyticsChart
-                  title="Connection Status"
-                  subtitle="Connected vs disconnected devices over time"
-                  data={connectionChartData}
-                  type="multiBar"
-                  height={260}
-                  delay={0.2}
-                />
               </div>
 
-              {/* Device Activity Chart */}
+              <AnalyticsChart
+                title="Connected vs Disconnected Devices"
+                subtitle={`Device connection status over the last ${dateRange === '7d' ? '7 days' : dateRange === '30d' ? '30 days' : '90 days'}`}
+                data={connectionChartData}
+                type="multiBar"
+                height={280}
+                delay={0.2}
+              />
+            </div>
+          </motion.div>
+
+          {/* ══════════════════════════════════════════════════
+              4. PROJECT OVERVIEW TOGGLE BANNER
+              Appears only after clicking
+              ══════════════════════════════════════════════════ */}
+          <motion.div
+            className="mb-6"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4, duration: 0.5 }}
+          >
+            <button
+              onClick={handleToggleProjectOverview}
+              className={`w-full group relative overflow-hidden rounded-2xl p-5 border transition-all duration-500 ${
+                showProjectOverview
+                  ? 'bg-gradient-to-r from-brand-500/15 via-purple-500/10 to-brand-600/15 border-brand-500/30'
+                  : 'bg-gradient-to-r from-brand-500/10 via-purple-500/5 to-brand-600/10 border-border/50 hover:border-brand-500/30'
+              }`}
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-brand-500/5 via-transparent to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+              <div className="relative z-10 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-gradient-to-br from-brand-500/20 to-purple-500/20 border border-brand-500/20">
+                    <Eye className="h-5 w-5 text-brand-500" />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-base font-semibold text-foreground flex items-center gap-2">
+                      Here&apos;s what&apos;s happening with your IoT systems
+                      <Sparkles className="h-4 w-4 text-brand-400 opacity-70" />
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {showProjectOverview ? 'Click to collapse project overview' : 'Click to explore all subsystems and reports'}
+                    </p>
+                  </div>
+                </div>
+                <motion.div
+                  animate={{ rotate: showProjectOverview ? 180 : 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                </motion.div>
+              </div>
+            </button>
+          </motion.div>
+
+          {/* ══════════════════════════════════════════════════
+              5. PROJECT OVERVIEW — Shown only when toggled
+              SCADA, Map, SLD, OMS, Reports
+              ══════════════════════════════════════════════════ */}
+          <AnimatePresence>
+            {showProjectOverview && (
+              <motion.div
+                ref={projectOverviewRef}
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                className="overflow-hidden mb-8"
+              >
+                <div className="pt-2">
+                  <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+                    Project Overview
+                  </h2>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+                    {/* SCADA, Map, SLD, OMS cards */}
+                    {PROJECT_SUBSYSTEMS.map((subsystem, index) => (
+                      <motion.div
+                        key={subsystem.href}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.05 + index * 0.06, duration: 0.4 }}
+                      >
+                        <Link href={subsystem.href}>
+                          <div className={`
+                            relative overflow-hidden rounded-xl p-4
+                            bg-gradient-to-br ${subsystem.color}
+                            border ${subsystem.borderColor}
+                            backdrop-blur-xl
+                            hover:scale-[1.03] hover:shadow-lg
+                            transition-all duration-300 cursor-pointer
+                            group h-full
+                          `}>
+                            <div className="absolute -top-6 -right-6 w-20 h-20 bg-gradient-to-br from-white/5 to-transparent rounded-full blur-2xl" />
+                            <div className="relative z-10">
+                              <div className={`inline-flex p-2 rounded-lg ${subsystem.iconBg} mb-2`}>
+                                <subsystem.icon className={`h-5 w-5 ${subsystem.iconColor}`} />
+                              </div>
+                              <h3 className="font-semibold text-foreground text-sm mb-0.5">{subsystem.title}</h3>
+                              <p className="text-xs text-muted-foreground leading-relaxed">{subsystem.description}</p>
+                              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground mt-2 opacity-0 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
+                            </div>
+                          </div>
+                        </Link>
+                      </motion.div>
+                    ))}
+
+                    {/* Reports card with sub-items */}
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.3, duration: 0.4 }}
+                    >
+                      <Link href="/reports">
+                        <div className="relative overflow-hidden rounded-xl p-4 bg-gradient-to-br from-cyan-500/20 to-cyan-600/10 border border-cyan-500/30 backdrop-blur-xl hover:scale-[1.03] hover:shadow-lg transition-all duration-300 cursor-pointer group h-full">
+                          <div className="absolute -top-6 -right-6 w-20 h-20 bg-gradient-to-br from-white/5 to-transparent rounded-full blur-2xl" />
+                          <div className="relative z-10">
+                            <div className="inline-flex p-2 rounded-lg bg-cyan-500/20 mb-2">
+                              <FileText className="h-5 w-5 text-cyan-400" />
+                            </div>
+                            <h3 className="font-semibold text-foreground text-sm mb-1.5">Reports</h3>
+                            <div className="space-y-1">
+                              {REPORT_SUBITEMS.map((item) => (
+                                <div key={item.label} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                                  <item.icon className="h-3 w-3 flex-shrink-0" />
+                                  <span>{item.label}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </Link>
+                    </motion.div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* ══════════════════════════════════════════════════
+              6. MAIN CONTENT — Charts + System Health + Alerts
+              ══════════════════════════════════════════════════ */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            {/* Left Column - Device Activity Chart */}
+            <motion.div
+              className="lg:col-span-2 space-y-6"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.5, duration: 0.5 }}
+            >
               <AnalyticsChart
                 title="Device Activity"
                 subtitle="Commands and data points over the last 7 days"
@@ -624,7 +777,9 @@ export default function DashboardPage() {
             </motion.div>
           </div>
 
-          {/* ===== BOTTOM: Recent Activity ===== */}
+          {/* ══════════════════════════════════════════════════
+              7. RECENT ACTIVITY
+              ══════════════════════════════════════════════════ */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}

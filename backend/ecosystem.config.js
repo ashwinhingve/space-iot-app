@@ -59,9 +59,21 @@ module.exports = {
     }
   ],
 
-  // Deployment configuration (optional - for pm2 deploy)
+  // Deployment configuration (for pm2 deploy)
   deploy: {
+    // AWS EC2 deployment
     production: {
+      user: 'ubuntu',
+      host: 'api.spaceautotech.com',
+      ref: 'origin/main',
+      repo: 'git@github.com:ashwinhingve/space-iot-app.git',
+      path: '/var/www/iotspace',
+      'pre-deploy-local': '',
+      'post-deploy': 'cd backend && npm install && npm run build && pm2 reload ecosystem.config.js --env production',
+      'pre-setup': ''
+    },
+    // Oracle Cloud Free Tier deployment
+    'oracle-free': {
       user: 'ubuntu',
       host: 'api.spaceautotech.com',
       ref: 'origin/main',
