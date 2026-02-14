@@ -42,11 +42,15 @@ const envSchema: Record<string, EnvConfig> = {
   FRONTEND_URL: {
     required: true,
     description: 'Frontend URL for CORS'
+  },
+  MQTT_MODE: {
+    required: false,
+    description: 'MQTT mode: local (default), aws, or cloud'
   }
 };
 
-// Production-only required variables
-const productionEnvSchema: Record<string, EnvConfig> = {
+// AWS IoT Core variables - required only when MQTT_MODE=aws
+const awsEnvSchema: Record<string, EnvConfig> = {
   AWS_REGION: {
     required: true,
     description: 'AWS region for IoT Core'
@@ -70,6 +74,22 @@ const productionEnvSchema: Record<string, EnvConfig> = {
   }
 };
 
+// Cloud MQTT variables - required only when MQTT_MODE=cloud
+const cloudMqttEnvSchema: Record<string, EnvConfig> = {
+  MQTT_BROKER_URL: {
+    required: true,
+    description: 'Cloud MQTT broker URL (e.g., mqtts://broker.hivemq.com:8883)'
+  },
+  MQTT_USERNAME: {
+    required: false,
+    description: 'Cloud MQTT broker username'
+  },
+  MQTT_PASSWORD: {
+    required: false,
+    description: 'Cloud MQTT broker password'
+  }
+};
+
 interface ValidationError {
   variable: string;
   message: string;
@@ -77,12 +97,15 @@ interface ValidationError {
 
 export function validateEnv(): void {
   const errors: ValidationError[] = [];
-  const isProduction = process.env.NODE_ENV === 'production';
+  const mqttMode = process.env.MQTT_MODE || 'local';
 
-  // Combine base schema with production schema if in production
-  const schema = isProduction
-    ? { ...envSchema, ...productionEnvSchema }
-    : envSchema;
+  // Build schema based on MQTT_MODE
+  let schema = { ...envSchema };
+  if (mqttMode === 'aws') {
+    schema = { ...schema, ...awsEnvSchema };
+  } else if (mqttMode === 'cloud') {
+    schema = { ...schema, ...cloudMqttEnvSchema };
+  }
 
   for (const [name, config] of Object.entries(schema)) {
     const value = process.env[name];
@@ -134,10 +157,12 @@ export function validateEnv(): void {
     process.exit(1);
   }
 
-  console.log('Environment validation passed');
+  console.log(`Environment validation passed (MQTT_MODE=${mqttMode})`);
 }
 
 export function getEnvConfig() {
+  const mqttMode = (process.env.MQTT_MODE || 'local') as 'local' | 'aws' | 'cloud';
+
   return {
     nodeEnv: process.env.NODE_ENV || 'development',
     isProduction: process.env.NODE_ENV === 'production',
@@ -148,7 +173,12 @@ export function getEnvConfig() {
     googleClientId: process.env.GOOGLE_CLIENT_ID!,
     frontendUrl: process.env.FRONTEND_URL!,
     mqttPort: parseInt(process.env.MQTT_PORT || '1883', 10),
-    // AWS IoT Core (production only)
+    // MQTT mode
+    mqttMode,
+    mqttBrokerUrl: process.env.MQTT_BROKER_URL,
+    mqttUsername: process.env.MQTT_USERNAME,
+    mqttPassword: process.env.MQTT_PASSWORD,
+    // AWS IoT Core (MQTT_MODE=aws only)
     awsRegion: process.env.AWS_REGION,
     awsIotEndpoint: process.env.AWS_IOT_ENDPOINT,
     awsIotCertPath: process.env.AWS_IOT_CERT_PATH,

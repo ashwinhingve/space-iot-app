@@ -56,12 +56,13 @@ const IV_LENGTH = 16;
 
 // Get encryption key as Buffer
 const getEncryptionKey = (): Buffer => {
-  if (process.env.WIFI_ENCRYPTION_KEY) {
-    // If key is from env, it's a hex string - convert to Buffer
-    return Buffer.from(process.env.WIFI_ENCRYPTION_KEY, 'hex');
+  if (!process.env.WIFI_ENCRYPTION_KEY) {
+    throw new Error(
+      'WIFI_ENCRYPTION_KEY environment variable is required. ' +
+      'Generate one with: openssl rand -hex 32'
+    );
   }
-  // Generate a random key if not provided
-  return crypto.randomBytes(32);
+  return Buffer.from(process.env.WIFI_ENCRYPTION_KEY, 'hex');
 };
 
 const ENCRYPTION_KEY = getEncryptionKey();

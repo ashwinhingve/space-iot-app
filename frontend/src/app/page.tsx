@@ -73,16 +73,6 @@ const staggerContainer = {
   }
 } as const
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const scaleIn = {
-  hidden: { opacity: 0, scale: 0.96 },
-  visible: {
-    opacity: 1,
-    scale: 1,
-    transition: { duration: 0.6, ease: easeOut }
-  }
-} as const
-
 const slideInLeft = {
   hidden: { opacity: 0, x: -40, scale: 0.96 },
   visible: {

@@ -7,6 +7,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import mqtt from 'mqtt';
 import Aedes from 'aedes';
+import jwt from 'jsonwebtoken';
 
 // Import routes and models
 import authRoutes from './routes/authRoutes';
@@ -116,7 +117,7 @@ const handleMqttMessage = async (topic: string, message: Buffer) => {
 
         if (!updatedDevice) {
           updatedDevice = await Device.findOneAndUpdate(
-            { mqttTopic: { $regex: deviceId, $options: 'i' } },
+            { mqttTopic: { $regex: `/${deviceId}$`, $options: 'i' } },
             { status: isOnline ? 'online' : 'offline', lastSeen: new Date() },
             { new: true }
           );
@@ -161,7 +162,7 @@ const handleMqttMessage = async (topic: string, message: Buffer) => {
 
           if (!updatedDevice) {
             updatedDevice = await Device.findOneAndUpdate(
-              { mqttTopic: { $regex: deviceId, $options: 'i' } },
+              { mqttTopic: { $regex: `/${deviceId}$`, $options: 'i' } },
               {
                 $set: {
                   status: 'online',
@@ -234,18 +235,20 @@ const handleMqttMessage = async (topic: string, message: Buffer) => {
 };
 
 // ============================================================
-// ===== MQTT SETUP (Conditional: Aedes for dev, AWS IoT for prod) =====
+// ===== MQTT SETUP (3 modes: local, aws, cloud) =====
 // ============================================================
 
 let aedes: Aedes | null = null;
 let mqttServer: net.Server | null = null;
 let mqttClient: mqtt.MqttClient | null = null;
+let cloudMqttClient: mqtt.MqttClient | null = null;
 
 async function setupMqtt() {
-  if (isProduction) {
-    // Production: Use AWS IoT Core
-    console.log('Setting up AWS IoT Core for production...');
+  const mqttMode = config.mqttMode;
+  console.log(`Setting up MQTT in '${mqttMode}' mode...`);
 
+  if (mqttMode === 'aws') {
+    // AWS IoT Core
     const awsConfig: AwsIotConfig = {
       endpoint: config.awsIotEndpoint!,
       certPath: config.awsIotCertPath!,
@@ -257,14 +260,12 @@ async function setupMqtt() {
 
     await awsIotService.initialize(awsConfig, handleMqttMessage);
 
-    // Subscribe to device topics
     await awsIotService.subscribe('devices/+/data');
     await awsIotService.subscribe('devices/+/online');
     await awsIotService.subscribe('manifolds/+/status');
     await awsIotService.subscribe('manifolds/+/online');
     await awsIotService.subscribe('manifolds/+/ack');
 
-    // Store AWS IoT service in app context for controllers
     app.set('mqttClient', {
       publish: (topic: string, message: string, options?: any, callback?: (err?: Error) => void) => {
         awsIotService.publish(topic, message, options?.qos || 1)
@@ -276,10 +277,64 @@ async function setupMqtt() {
 
     console.log('AWS IoT Core setup complete');
 
-  } else {
-    // Development: Use local Aedes broker
-    console.log('Setting up Aedes MQTT broker for development...');
+  } else if (mqttMode === 'cloud') {
+    // Cloud MQTT broker (HiveMQ, EMQX, etc.)
+    const brokerUrl = config.mqttBrokerUrl!;
+    console.log(`Connecting to cloud MQTT broker: ${brokerUrl}`);
 
+    cloudMqttClient = mqtt.connect(brokerUrl, {
+      username: config.mqttUsername,
+      password: config.mqttPassword,
+      clientId: `iotspace-backend-${Date.now()}`,
+      reconnectPeriod: 5000,
+      connectTimeout: 10000,
+    });
+
+    cloudMqttClient.on('connect', () => {
+      console.log('Connected to cloud MQTT broker');
+
+      // Subscribe to device topics
+      const topics = [
+        'devices/+/data',
+        'devices/+/online',
+        'manifolds/+/status',
+        'manifolds/+/online',
+        'manifolds/+/ack'
+      ];
+      cloudMqttClient!.subscribe(topics, { qos: 1 }, (err) => {
+        if (err) {
+          console.error('Cloud MQTT subscribe error:', err);
+        } else {
+          console.log('Subscribed to device topics on cloud broker');
+        }
+      });
+    });
+
+    cloudMqttClient.on('message', async (topic, message) => {
+      if (topic.startsWith('devices/') || topic.startsWith('manifolds/')) {
+        try {
+          await handleMqttMessage(topic, message);
+        } catch (err) {
+          console.error('Cloud MQTT message handler error:', err);
+        }
+      }
+    });
+
+    cloudMqttClient.on('error', (err) => {
+      console.error('Cloud MQTT error:', err);
+    });
+
+    cloudMqttClient.on('offline', () => {
+      console.warn('Cloud MQTT client offline, will reconnect...');
+    });
+
+    // Store cloud client in app context for controllers
+    app.set('mqttClient', cloudMqttClient);
+
+    console.log('Cloud MQTT setup complete');
+
+  } else {
+    // Local Aedes broker (default for development)
     aedes = new Aedes();
     mqttServer = net.createServer(aedes.handle);
 
@@ -289,7 +344,6 @@ async function setupMqtt() {
       console.log(`  - Network: mqtt://0.0.0.0:${config.mqttPort}`);
     });
 
-    // Aedes broker events
     aedes.on('client', (client) => {
       console.log(`MQTT Client Connected: ${client?.id || 'unknown'}`);
     });
@@ -302,31 +356,24 @@ async function setupMqtt() {
       console.log(`MQTT Client ${client?.id} subscribed to: ${subscriptions.map(s => s.topic).join(', ')}`);
     });
 
-    // Handle ALL messages directly from the broker
     aedes.on('publish', async (packet, client) => {
       const topic = packet.topic;
-
-      // Skip internal topics (start with $)
       if (topic.startsWith('$')) return;
 
-      // Log external publishes
       if (client) {
         console.log(`MQTT Publish from ${client.id}: ${topic}`);
       }
 
-      // Process device and manifold messages
       if (topic.startsWith('devices/') || topic.startsWith('manifolds/')) {
-        console.log(`>>> Calling handleMqttMessage for topic: ${topic}`);
         try {
           await handleMqttMessage(topic, packet.payload as Buffer);
-          console.log(`>>> handleMqttMessage completed for topic: ${topic}`);
         } catch (err) {
-          console.error(`>>> handleMqttMessage ERROR:`, err);
+          console.error('Aedes message handler error:', err);
         }
       }
     });
 
-    // Create MQTT client for PUBLISHING only (to send commands to devices)
+    // Create MQTT client for PUBLISHING only
     setTimeout(() => {
       mqttClient = mqtt.connect(`mqtt://localhost:${config.mqttPort}`, {
         reconnectPeriod: 1000,
@@ -338,7 +385,6 @@ async function setupMqtt() {
         console.log('Backend MQTT publisher ready');
       });
 
-      // Store MQTT client in app context for controllers to publish commands
       app.set('mqttClient', mqttClient);
     }, 500);
   }
@@ -368,6 +414,29 @@ const checkDevicesStatus = async () => {
 };
 
 setInterval(checkDevicesStatus, 5000);
+
+// Expire old valve commands every 60 seconds
+setInterval(async () => {
+  try {
+    await (ValveCommand as any).expireOldCommands();
+  } catch (err) {
+    console.error('Error expiring valve commands:', err);
+  }
+}, 60000);
+
+// Socket.io authentication middleware
+io.use((socket, next) => {
+  const token = socket.handshake.auth.token;
+  if (!token) {
+    return next(new Error('Authentication required'));
+  }
+  try {
+    jwt.verify(token, config.jwtSecret);
+    next();
+  } catch {
+    next(new Error('Invalid token'));
+  }
+});
 
 // Socket.io connection
 io.on('connection', (socket) => {
@@ -442,10 +511,15 @@ mongoose.connect(config.mongodbUri)
 // ============================================================
 
 app.get('/api/health', async (req, res) => {
-  const mqttClientInstance = app.get('mqttClient');
-  const mqttConnected = isProduction
-    ? awsIotService.isConnected()
-    : (mqttClientInstance?.connected ?? false);
+  let mqttConnected = false;
+  if (config.mqttMode === 'aws') {
+    mqttConnected = awsIotService.isConnected();
+  } else if (config.mqttMode === 'cloud') {
+    mqttConnected = cloudMqttClient?.connected ?? false;
+  } else {
+    const mqttClientInstance = app.get('mqttClient');
+    mqttConnected = mqttClientInstance?.connected ?? false;
+  }
 
   res.json({
     status: 'ok',
@@ -567,8 +641,12 @@ process.on('SIGTERM', async () => {
   ttnMqttService.disconnect();
 
   // Close MQTT connections
-  if (isProduction) {
+  if (config.mqttMode === 'aws') {
     await awsIotService.disconnect();
+  } else if (config.mqttMode === 'cloud') {
+    if (cloudMqttClient) {
+      cloudMqttClient.end();
+    }
   } else {
     if (mqttClient) {
       mqttClient.end();

@@ -8,15 +8,9 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.controlDevice = exports.deleteDevice = exports.updateDevice = exports.getDevice = exports.getDevices = exports.createDevice = void 0;
 const Device_1 = require("../models/Device");
-const mqtt_1 = __importDefault(require("mqtt"));
-// MQTT client for publishing messages
-const mqttClient = mqtt_1.default.connect(process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883');
 const createDevice = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         let { name, type, mqttTopic } = req.body;
@@ -112,8 +106,18 @@ const controlDevice = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (!device) {
             return res.status(404).json({ error: 'Device not found' });
         }
+        // Get MQTT client from app context (works with both Aedes and AWS IoT)
+        const mqttClient = req.app.get('mqttClient');
+        if (!mqttClient) {
+            console.error('MQTT client not available');
+            return res.status(503).json({ error: 'MQTT service unavailable' });
+        }
         // Publish control message to MQTT
-        mqttClient.publish(`${device.mqttTopic}/control`, JSON.stringify({ value }), { qos: 1 });
+        mqttClient.publish(`${device.mqttTopic}/control`, JSON.stringify({ value }), { qos: 1 }, (err) => {
+            if (err) {
+                console.error('Error publishing MQTT message:', err);
+            }
+        });
         res.json({ message: 'Control command sent successfully' });
     }
     catch (error) {
