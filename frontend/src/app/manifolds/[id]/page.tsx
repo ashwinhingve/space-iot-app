@@ -204,13 +204,17 @@ export default function ManifoldDetailPage() {
       .map((a) => ({ ...a, valveId: v._id, valveNumber: v.valveNumber }))
   );
 
-  // Prepare valve data for 3D viewer
-  const valveStatesFor3D = manifoldValves.map((v) => ({
-    valveNumber: v.valveNumber,
-    status: getValveStatus(v) as 'ON' | 'OFF' | 'FAULT',
-    mode: v.operationalData.mode as 'AUTO' | 'MANUAL',
-    cycleCount: v.operationalData.cycleCount,
-  }));
+  // Prepare valve data for 3D viewer (map to ValveState shape)
+  const valveStatesFor3D = manifoldValves.map((v) => {
+    const status = getValveStatus(v);
+    return {
+      id: v.valveNumber,
+      label: `Valve ${v.valveNumber}`,
+      isOpen: status === 'ON',
+      pressure: 0,
+      flowRate: 0,
+    };
+  });
 
   const tabs = [
     { id: 'control' as TabType, label: 'Control Panel', icon: LayoutDashboard },
@@ -628,9 +632,15 @@ export default function ManifoldDetailPage() {
                 <div className="h-[600px] lg:h-[700px]">
                   <Manifold3DViewer
                     valves={valveStatesFor3D}
-                    manifoldName={selectedManifold.name}
+                    ptfcOn={false}
+                    sasfOn={false}
+                    pressures={{ inlet: 0, postFilter: 0, distribution: 0, outlets: [0, 0, 0, 0] }}
+                    flowRates={[0, 0, 0, 0]}
+                    maxPressure={10}
                     isOnline={isOnline}
                     onValveClick={handleValveClickFrom3D}
+                    onPTFCClick={() => {}}
+                    onSASFClick={() => {}}
                   />
                 </div>
               </Card>
@@ -656,7 +666,7 @@ export default function ManifoldDetailPage() {
                     <div>
                       <p className="text-xs text-muted-foreground">Active Valves</p>
                       <p className="font-semibold">
-                        {valveStatesFor3D.filter((v) => v.status === 'ON').length} / {valveStatesFor3D.length}
+                        {valveStatesFor3D.filter((v) => v.isOpen).length} / {valveStatesFor3D.length}
                       </p>
                     </div>
                   </div>

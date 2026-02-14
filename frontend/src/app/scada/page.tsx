@@ -356,7 +356,7 @@ export default function ScadaPage() {
                 </div>
 
                 <div className="space-y-3">
-                  {sim.valves.map((v, i) => {
+                  {sim.valves.map((v) => {
                     const maxFlow = 3.0;
                     const pct = Math.min(100, (v.flowRate / maxFlow) * 100);
                     const barColor = v.isOpen
