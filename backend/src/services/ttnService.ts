@@ -5,6 +5,46 @@
 
 import crypto from 'crypto';
 
+// TTN-specific error classes
+export class TTNAuthError extends Error {
+  constructor(message: string = 'Invalid or expired API key') {
+    super(message);
+    this.name = 'TTNAuthError';
+  }
+}
+
+export class TTNRateLimitError extends Error {
+  constructor(message: string = 'TTN rate limit exceeded') {
+    super(message);
+    this.name = 'TTNRateLimitError';
+  }
+}
+
+export class TTNNetworkError extends Error {
+  constructor(message: string = 'Cannot reach TTN API') {
+    super(message);
+    this.name = 'TTNNetworkError';
+  }
+}
+
+/**
+ * Parse TTN API response errors into specific error types
+ */
+function parseTTNError(status: number, body: Record<string, unknown>): Error {
+  const detail = (body?.message as string) || (body?.error as string) || '';
+
+  if (status === 401 || status === 403) {
+    return new TTNAuthError(detail || 'Invalid or expired API key');
+  }
+  if (status === 429) {
+    return new TTNRateLimitError(detail || 'TTN rate limit exceeded, please retry later');
+  }
+  if (status >= 500) {
+    return new TTNNetworkError(detail || 'TTN service unavailable');
+  }
+  return new Error(`TTN API error: ${status} - ${detail || JSON.stringify(body)}`);
+}
+
 export interface TTNConfig {
   region: string; // eu1, nam1, au1
   applicationId: string;
@@ -102,13 +142,15 @@ class TTNService {
       });
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        throw new Error(`TTN API error: ${response.status} - ${JSON.stringify(error)}`);
+        const body = await response.json().catch(() => ({}));
+        throw parseTTNError(response.status, body);
       }
 
       const data = await response.json();
       return data.end_devices || [];
     } catch (error) {
+      if (error instanceof TTNAuthError || error instanceof TTNRateLimitError || error instanceof TTNNetworkError) throw error;
+      if (error instanceof TypeError) throw new TTNNetworkError('Cannot reach TTN API');
       console.error('Error fetching TTN devices:', error);
       throw error;
     }
@@ -133,12 +175,14 @@ class TTNService {
       }
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        throw new Error(`TTN API error: ${response.status} - ${JSON.stringify(error)}`);
+        const body = await response.json().catch(() => ({}));
+        throw parseTTNError(response.status, body);
       }
 
       return await response.json();
     } catch (error) {
+      if (error instanceof TTNAuthError || error instanceof TTNRateLimitError || error instanceof TTNNetworkError) throw error;
+      if (error instanceof TypeError) throw new TTNNetworkError('Cannot reach TTN API');
       console.error(`Error fetching TTN device ${deviceId}:`, error);
       throw error;
     }
@@ -159,12 +203,14 @@ class TTNService {
       });
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        throw new Error(`TTN API error: ${response.status} - ${JSON.stringify(error)}`);
+        const body = await response.json().catch(() => ({}));
+        throw parseTTNError(response.status, body);
       }
 
       return await response.json();
     } catch (error) {
+      if (error instanceof TTNAuthError || error instanceof TTNRateLimitError || error instanceof TTNNetworkError) throw error;
+      if (error instanceof TypeError) throw new TTNNetworkError('Cannot reach TTN API');
       console.error('Error fetching TTN application:', error);
       throw error;
     }
@@ -199,13 +245,15 @@ class TTNService {
       });
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        throw new Error(`TTN downlink error: ${response.status} - ${JSON.stringify(error)}`);
+        const body = await response.json().catch(() => ({}));
+        throw parseTTNError(response.status, body);
       }
 
       console.log(`Downlink sent to ${request.deviceId} with correlation ID: ${correlationId}`);
       return { success: true, correlationId };
     } catch (error) {
+      if (error instanceof TTNAuthError || error instanceof TTNRateLimitError || error instanceof TTNNetworkError) throw error;
+      if (error instanceof TypeError) throw new TTNNetworkError('Cannot reach TTN API');
       console.error(`Error sending downlink to ${request.deviceId}:`, error);
       throw error;
     }
@@ -237,12 +285,14 @@ class TTNService {
       });
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        throw new Error(`TTN queue replace error: ${response.status} - ${JSON.stringify(error)}`);
+        const body = await response.json().catch(() => ({}));
+        throw parseTTNError(response.status, body);
       }
 
       return true;
     } catch (error) {
+      if (error instanceof TTNAuthError || error instanceof TTNRateLimitError || error instanceof TTNNetworkError) throw error;
+      if (error instanceof TypeError) throw new TTNNetworkError('Cannot reach TTN API');
       console.error(`Error replacing downlink queue for ${deviceId}:`, error);
       throw error;
     }
@@ -291,13 +341,15 @@ class TTNService {
       });
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        throw new Error(`TTN webhook creation error: ${response.status} - ${JSON.stringify(error)}`);
+        const body = await response.json().catch(() => ({}));
+        throw parseTTNError(response.status, body);
       }
 
       console.log(`Webhook ${config.webhookId} created successfully`);
       return true;
     } catch (error) {
+      if (error instanceof TTNAuthError || error instanceof TTNRateLimitError || error instanceof TTNNetworkError) throw error;
+      if (error instanceof TypeError) throw new TTNNetworkError('Cannot reach TTN API');
       console.error('Error creating TTN webhook:', error);
       throw error;
     }
@@ -318,13 +370,15 @@ class TTNService {
       });
 
       if (!response.ok && response.status !== 404) {
-        const error = await response.json().catch(() => ({}));
-        throw new Error(`TTN webhook deletion error: ${response.status} - ${JSON.stringify(error)}`);
+        const body = await response.json().catch(() => ({}));
+        throw parseTTNError(response.status, body);
       }
 
       console.log(`Webhook ${webhookId} deleted`);
       return true;
     } catch (error) {
+      if (error instanceof TTNAuthError || error instanceof TTNRateLimitError || error instanceof TTNNetworkError) throw error;
+      if (error instanceof TypeError) throw new TTNNetworkError('Cannot reach TTN API');
       console.error(`Error deleting TTN webhook ${webhookId}:`, error);
       throw error;
     }

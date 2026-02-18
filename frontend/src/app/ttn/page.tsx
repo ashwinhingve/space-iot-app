@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { motion, AnimatePresence } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
@@ -16,19 +16,23 @@ import {
   fetchTTNDevices,
   fetchTTNUplinks,
   fetchTTNDownlinks,
+  fetchTTNLogs,
   fetchTTNStats,
   fetchTTNGateways,
   fetchTTNGatewayStats,
   sendTTNDownlink,
+  updateTTNApiKey,
   setSelectedApplication,
   addUplink,
+  addLogEntry,
   updateDownlinkStatus,
   updateGatewayFromUplink,
   clearError,
   clearSuccess,
   TTNDevice,
+  TTNLogEntry,
 } from '@/store/slices/ttnSlice';
-import { SOCKET_CONFIG } from '@/lib/config';
+import { SOCKET_CONFIG, API_ENDPOINTS } from '@/lib/config';
 import {
   AreaChart,
   Area,
@@ -60,9 +64,15 @@ import {
   Server,
   BarChart3,
   MapPin,
+  KeyRound,
+  ShieldCheck,
+  Download,
+  Trash2,
+  AlertTriangle,
+  Filter,
 } from 'lucide-react';
 
-type TabType = 'overview' | 'devices' | 'gateways' | 'uplinks' | 'downlinks';
+type TabType = 'overview' | 'devices' | 'gateways' | 'uplinks' | 'downlinks' | 'logs';
 
 // RSSI quality indicator helper
 function getRssiColor(rssi: number): string {
@@ -88,11 +98,20 @@ export default function TTNPage() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [showAddApp, setShowAddApp] = useState(false);
   const [showDownlinkModal, setShowDownlinkModal] = useState(false);
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [selectedDeviceForDownlink, setSelectedDeviceForDownlink] = useState<TTNDevice | null>(null);
-  const [apiKey, setApiKey] = useState('');
+  const [newApiKey, setNewApiKey] = useState('');
   const [, setSocket] = useState<Socket | null>(null);
   const [statsPeriod, setStatsPeriod] = useState('24h');
   const [expandedUplinkId, setExpandedUplinkId] = useState<string | null>(null);
+  const [logFilter, setLogFilter] = useState({
+    deviceId: 'all',
+    eventType: 'all',
+    gatewayId: '',
+    timeRange: '24h' as '1h' | '6h' | '24h',
+  });
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
   // Form states
   const [newApp, setNewApp] = useState({
@@ -116,6 +135,8 @@ export default function TTNPage() {
     gateways,
     uplinks,
     downlinks,
+    logs,
+    logsTotal,
     stats,
     loading,
     syncLoading,
@@ -127,6 +148,18 @@ export default function TTNPage() {
   useEffect(() => {
     dispatch(fetchTTNApplications());
   }, [dispatch]);
+
+  // Refresh data for selected app
+  const refreshAppData = useCallback(() => {
+    if (selectedApplication) {
+      dispatch(fetchTTNDevices(selectedApplication.applicationId));
+      dispatch(fetchTTNUplinks({ applicationId: selectedApplication.applicationId }));
+      dispatch(fetchTTNDownlinks({ applicationId: selectedApplication.applicationId }));
+      dispatch(fetchTTNStats({ applicationId: selectedApplication.applicationId, period: statsPeriod }));
+      dispatch(fetchTTNGateways(selectedApplication.applicationId));
+      dispatch(fetchTTNGatewayStats(selectedApplication.applicationId));
+    }
+  }, [selectedApplication, dispatch, statsPeriod]);
 
   // Setup Socket.io for real-time updates
   useEffect(() => {
@@ -140,6 +173,11 @@ export default function TTNPage() {
 
       newSocket.on('ttnUplink', (data) => {
         dispatch(addUplink(data.uplink));
+        dispatch(addLogEntry({
+          ...data.uplink,
+          _type: 'uplink',
+          _timestamp: data.uplink.receivedAt,
+        } as TTNLogEntry));
       });
 
       newSocket.on('ttnGatewayUpdate', (data) => {
@@ -154,6 +192,15 @@ export default function TTNPage() {
           status: 'SENT',
           timestamp: data.timestamp,
         }));
+        dispatch(addLogEntry({
+          _id: data.correlationIds?.[0] || Date.now().toString(),
+          _type: 'downlink',
+          _timestamp: data.timestamp || new Date().toISOString(),
+          deviceId: data.deviceId,
+          applicationId: data.applicationId,
+          status: 'SENT',
+          correlationId: data.correlationIds?.[0],
+        } as TTNLogEntry));
       });
 
       newSocket.on('ttnDownlinkAck', (data) => {
@@ -181,17 +228,33 @@ export default function TTNPage() {
     }
   }, [selectedApplication, dispatch]);
 
-  // Fetch data when application is selected
+  // Fetch data when application is selected or period changes
   useEffect(() => {
-    if (selectedApplication) {
-      dispatch(fetchTTNDevices(selectedApplication.applicationId));
-      dispatch(fetchTTNUplinks({ applicationId: selectedApplication.applicationId }));
-      dispatch(fetchTTNDownlinks({ applicationId: selectedApplication.applicationId }));
-      dispatch(fetchTTNStats({ applicationId: selectedApplication.applicationId, period: statsPeriod }));
-      dispatch(fetchTTNGateways(selectedApplication.applicationId));
-      dispatch(fetchTTNGatewayStats(selectedApplication.applicationId));
+    refreshAppData();
+  }, [refreshAppData]);
+
+  // Auto-refresh every 60 seconds
+  useEffect(() => {
+    if (!selectedApplication) return;
+    const interval = setInterval(refreshAppData, 60000);
+    return () => clearInterval(interval);
+  }, [selectedApplication, refreshAppData]);
+
+  // Fetch logs when Live Logs tab is active or filters change
+  useEffect(() => {
+    if (activeTab === 'logs' && selectedApplication) {
+      const now = new Date();
+      const rangeMs = logFilter.timeRange === '1h' ? 3600000 : logFilter.timeRange === '6h' ? 21600000 : 86400000;
+      const startDate = new Date(now.getTime() - rangeMs).toISOString();
+      dispatch(fetchTTNLogs({
+        applicationId: selectedApplication.applicationId,
+        startDate,
+        deviceId: logFilter.deviceId !== 'all' ? logFilter.deviceId : undefined,
+        gatewayId: logFilter.gatewayId || undefined,
+        eventType: logFilter.eventType !== 'all' ? logFilter.eventType : undefined,
+      }));
     }
-  }, [selectedApplication, dispatch, statsPeriod]);
+  }, [activeTab, selectedApplication, logFilter, dispatch]);
 
   // Clear messages after 5 seconds
   useEffect(() => {
@@ -225,14 +288,25 @@ export default function TTNPage() {
   };
 
   const handleSyncDevices = async () => {
-    if (selectedApplication && apiKey) {
-      await dispatch(syncTTNDevices({ applicationId: selectedApplication.applicationId, apiKey }));
+    if (selectedApplication) {
+      await dispatch(syncTTNDevices({ applicationId: selectedApplication.applicationId }));
+    }
+  };
+
+  const handleUpdateApiKey = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedApplication && newApiKey) {
+      const result = await dispatch(updateTTNApiKey({ id: selectedApplication._id, apiKey: newApiKey }));
+      if (!result.type.endsWith('rejected')) {
+        setShowApiKeyModal(false);
+        setNewApiKey('');
+      }
     }
   };
 
   const handleSendDownlink = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedApplication && selectedDeviceForDownlink && apiKey) {
+    if (selectedApplication && selectedDeviceForDownlink) {
       let base64Payload = downlinkData.payload;
       if (downlinkData.payload.match(/^[0-9a-fA-F]+$/)) {
         const bytes = downlinkData.payload.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || [];
@@ -246,7 +320,6 @@ export default function TTNPage() {
         payload: base64Payload,
         confirmed: downlinkData.confirmed,
         priority: downlinkData.priority,
-        apiKey,
       }));
       setShowDownlinkModal(false);
       setDownlinkData({ fPort: 1, payload: '', confirmed: false, priority: 'NORMAL' });
@@ -283,6 +356,7 @@ export default function TTNPage() {
     { key: 'gateways', label: 'Gateways', icon: <Server className="h-4 w-4" /> },
     { key: 'uplinks', label: 'Uplinks', icon: <ArrowUpCircle className="h-4 w-4" /> },
     { key: 'downlinks', label: 'Downlinks', icon: <ArrowDownCircle className="h-4 w-4" /> },
+    { key: 'logs', label: 'Live Logs', icon: <Activity className="h-4 w-4" /> },
   ];
 
   return (
@@ -315,14 +389,22 @@ export default function TTNPage() {
             </div>
 
             <div className="flex items-center gap-3">
+              {selectedApplication && selectedApplication.hasApiKey && (
+                <span className="px-3 py-1.5 text-xs font-medium rounded-lg bg-green-500/10 text-green-500 border border-green-500/20 flex items-center gap-1.5">
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  API Key Saved
+                </span>
+              )}
               {selectedApplication && (
-                <input
-                  type="password"
-                  placeholder="TTN API Key"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  className="px-3 py-2 text-sm border border-border/50 rounded-lg bg-background/50 backdrop-blur-sm w-48"
-                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowApiKeyModal(true)}
+                  className="flex items-center gap-1.5"
+                >
+                  <KeyRound className="h-4 w-4" />
+                  {selectedApplication.hasApiKey ? 'Update Key' : 'Set API Key'}
+                </Button>
               )}
               <Button
                 onClick={() => setShowAddApp(true)}
@@ -375,13 +457,22 @@ export default function TTNPage() {
                 >
                   <Radio className="h-4 w-4" />
                   {app.name}
+                  {app.hasApiKey ? (
+                    <ShieldCheck className={`h-3.5 w-3.5 ${
+                      selectedApplication?._id === app._id ? 'text-white/80' : 'text-green-500'
+                    }`} />
+                  ) : (
+                    <AlertCircle className={`h-3.5 w-3.5 ${
+                      selectedApplication?._id === app._id ? 'text-yellow-200' : 'text-yellow-500'
+                    }`} />
+                  )}
                   {selectedApplication?._id === app._id && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        dispatch(deleteTTNApplication(app._id));
+                        setShowDeleteConfirm(true);
                       }}
-                      className="ml-2 hover:text-red-200"
+                      className="ml-1 hover:text-red-200"
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -423,7 +514,7 @@ export default function TTNPage() {
                   variant="outline"
                   size="sm"
                   onClick={handleSyncDevices}
-                  disabled={syncLoading || !apiKey}
+                  disabled={syncLoading || !selectedApplication.hasApiKey}
                   className="ml-auto"
                 >
                   {syncLoading ? (
@@ -713,7 +804,7 @@ export default function TTNPage() {
                               setSelectedDeviceForDownlink(device);
                               setShowDownlinkModal(true);
                             }}
-                            disabled={!apiKey}
+                            disabled={!selectedApplication?.hasApiKey}
                           >
                             <Send className="h-3 w-3 mr-1" />
                             Downlink
@@ -1050,6 +1141,193 @@ export default function TTNPage() {
                     </div>
                   </motion.div>
                 )}
+
+                {/* ==================== LIVE LOGS TAB ==================== */}
+                {activeTab === 'logs' && (
+                  <motion.div
+                    key="logs"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    className="space-y-4"
+                  >
+                    {/* Filter Bar */}
+                    <div className="p-4 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                          <Filter className="h-4 w-4" />
+                          Filters
+                        </div>
+
+                        {/* Time Range */}
+                        <div className="flex gap-1">
+                          {(['1h', '6h', '24h'] as const).map((range) => (
+                            <button
+                              key={range}
+                              onClick={() => setLogFilter({ ...logFilter, timeRange: range })}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                                logFilter.timeRange === range
+                                  ? 'bg-green-500/20 text-green-500 border border-green-500/30'
+                                  : 'bg-secondary/50 hover:bg-secondary/80 text-muted-foreground'
+                              }`}
+                            >
+                              {range}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Event Type */}
+                        <select
+                          value={logFilter.eventType}
+                          onChange={(e) => setLogFilter({ ...logFilter, eventType: e.target.value })}
+                          className="px-3 py-1.5 rounded-lg text-xs bg-secondary/50 border border-border/50"
+                        >
+                          <option value="all">All Events</option>
+                          <option value="uplink">Uplinks Only</option>
+                          <option value="downlink">Downlinks Only</option>
+                        </select>
+
+                        {/* Device Filter */}
+                        <select
+                          value={logFilter.deviceId}
+                          onChange={(e) => setLogFilter({ ...logFilter, deviceId: e.target.value })}
+                          className="px-3 py-1.5 rounded-lg text-xs bg-secondary/50 border border-border/50"
+                        >
+                          <option value="all">All Devices</option>
+                          {devices.map((d) => (
+                            <option key={d.deviceId} value={d.deviceId}>
+                              {d.name || d.deviceId}
+                            </option>
+                          ))}
+                        </select>
+
+                        {/* Gateway filter */}
+                        <input
+                          type="text"
+                          placeholder="Gateway ID..."
+                          value={logFilter.gatewayId}
+                          onChange={(e) => setLogFilter({ ...logFilter, gatewayId: e.target.value })}
+                          className="px-3 py-1.5 rounded-lg text-xs bg-secondary/50 border border-border/50 w-36"
+                        />
+
+                        {/* Export Buttons */}
+                        <div className="ml-auto flex gap-2">
+                          {(['csv', 'json'] as const).map((fmt) => (
+                            <button
+                              key={fmt}
+                              onClick={async () => {
+                                if (!selectedApplication) return;
+                                const now = new Date();
+                                const rangeMs = logFilter.timeRange === '1h' ? 3600000 : logFilter.timeRange === '6h' ? 21600000 : 86400000;
+                                const params = new URLSearchParams();
+                                params.set('startDate', new Date(now.getTime() - rangeMs).toISOString());
+                                params.set('format', fmt);
+                                if (logFilter.deviceId !== 'all') params.set('deviceId', logFilter.deviceId);
+                                if (logFilter.gatewayId) params.set('gatewayId', logFilter.gatewayId);
+                                if (logFilter.eventType !== 'all') params.set('eventType', logFilter.eventType);
+                                const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+                                const resp = await fetch(
+                                  `${API_ENDPOINTS.TTN_LOGS_EXPORT(selectedApplication.applicationId)}?${params.toString()}`,
+                                  { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+                                );
+                                if (!resp.ok) return;
+                                const blob = await resp.blob();
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = `ttn-logs-${selectedApplication.applicationId}.${fmt}`;
+                                a.click();
+                                URL.revokeObjectURL(url);
+                              }}
+                              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-secondary/50 hover:bg-secondary/80 border border-border/50 flex items-center gap-1.5 transition-all"
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                              {fmt.toUpperCase()}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Log Count */}
+                    <div className="text-xs text-muted-foreground">
+                      Showing {logs.length} of {logsTotal} events
+                    </div>
+
+                    {/* Log Table */}
+                    <div className="rounded-xl bg-card/50 backdrop-blur-sm border border-border/50 overflow-hidden">
+                      <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-secondary/50 sticky top-0">
+                            <tr>
+                              <th className="px-4 py-3 text-left w-10">Type</th>
+                              <th className="px-4 py-3 text-left">Time</th>
+                              <th className="px-4 py-3 text-left">Device</th>
+                              <th className="px-4 py-3 text-left">Port</th>
+                              <th className="px-4 py-3 text-left">Payload</th>
+                              <th className="px-4 py-3 text-left">RSSI / Status</th>
+                              <th className="px-4 py-3 text-left">Gateway</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border/50">
+                            {logs.map((entry) => (
+                              <tr key={entry._id + entry._timestamp} className="hover:bg-secondary/30">
+                                <td className="px-4 py-3">
+                                  {entry._type === 'uplink' ? (
+                                    <ArrowUpCircle className="h-4 w-4 text-green-500" />
+                                  ) : (
+                                    <ArrowDownCircle className="h-4 w-4 text-blue-500" />
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap text-xs">
+                                  {formatDate(entry._timestamp)}
+                                </td>
+                                <td className="px-4 py-3 font-mono text-xs">{entry.deviceId}</td>
+                                <td className="px-4 py-3">{entry.fPort ?? '-'}</td>
+                                <td className="px-4 py-3 font-mono text-xs max-w-[120px] truncate">
+                                  {entry._type === 'uplink'
+                                    ? formatPayload(entry.rawPayload || '')
+                                    : formatPayload(entry.payload || '')}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {entry._type === 'uplink' ? (
+                                    <span className={getRssiColor(entry.rssi ?? 0)}>
+                                      {entry.rssi} dBm
+                                    </span>
+                                  ) : (
+                                    <span
+                                      className={`px-2 py-1 rounded-full text-xs ${
+                                        entry.status === 'ACKNOWLEDGED'
+                                          ? 'bg-green-500/10 text-green-500'
+                                          : entry.status === 'SENT'
+                                          ? 'bg-blue-500/10 text-blue-500'
+                                          : entry.status === 'FAILED'
+                                          ? 'bg-red-500/10 text-red-500'
+                                          : 'bg-yellow-500/10 text-yellow-500'
+                                      }`}
+                                    >
+                                      {entry.status}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 font-mono text-xs truncate max-w-[140px]">
+                                  {entry.gatewayId || '-'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {logs.length === 0 && (
+                          <div className="text-center py-12 text-muted-foreground">
+                            <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                            <p>No log entries</p>
+                            <p className="text-xs mt-1">Events will appear here as they arrive.</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
               </AnimatePresence>
             </>
           )}
@@ -1122,7 +1400,7 @@ export default function TTNPage() {
                       required
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      Create an API key in TTN Console with read/write permissions
+                      Your API key will be encrypted and stored securely on the server.
                     </p>
                   </div>
                   <div className="flex gap-3 pt-4">
@@ -1135,6 +1413,63 @@ export default function TTNPage() {
                       className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white"
                     >
                       {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Register'}
+                    </Button>
+                  </div>
+                </form>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Update API Key Modal */}
+        <AnimatePresence>
+          {showApiKeyModal && selectedApplication && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+              onClick={() => setShowApiKeyModal(false)}
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="w-full max-w-md bg-card rounded-2xl border border-border/50 p-6"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+                  <KeyRound className="h-5 w-5 text-amber-500" />
+                  {selectedApplication.hasApiKey ? 'Update' : 'Set'} API Key
+                </h2>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Application: <span className="font-mono">{selectedApplication.applicationId}</span>
+                </p>
+                <form onSubmit={handleUpdateApiKey} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">New API Key</label>
+                    <input
+                      type="password"
+                      value={newApiKey}
+                      onChange={(e) => setNewApiKey(e.target.value)}
+                      className="w-full px-3 py-2 border border-border/50 rounded-lg bg-background/50"
+                      placeholder="NNSXS.xxxxx..."
+                      required
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      The key will be verified with TTN before saving.
+                    </p>
+                  </div>
+                  <div className="flex gap-3 pt-4">
+                    <Button type="button" variant="outline" onClick={() => { setShowApiKeyModal(false); setNewApiKey(''); }} className="flex-1">
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      disabled={loading || !newApiKey}
+                      className="flex-1 bg-gradient-to-r from-amber-500 to-orange-500 text-white"
+                    >
+                      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save Key'}
                     </Button>
                   </div>
                 </form>
@@ -1216,6 +1551,86 @@ export default function TTNPage() {
                     </Button>
                   </div>
                 </form>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Delete Confirmation Modal */}
+        <AnimatePresence>
+          {showDeleteConfirm && selectedApplication && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+              onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(''); }}
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="w-full max-w-md bg-card rounded-2xl border border-border/50 p-6"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 rounded-lg bg-red-500/10">
+                    <AlertTriangle className="h-6 w-6 text-red-500" />
+                  </div>
+                  <h2 className="text-xl font-bold text-red-500">Delete Application</h2>
+                </div>
+
+                <p className="text-sm mb-3">
+                  You are about to permanently delete{' '}
+                  <span className="font-semibold">{selectedApplication.name}</span>.
+                </p>
+
+                <div className="p-3 rounded-lg bg-red-500/5 border border-red-500/20 mb-4 text-sm text-muted-foreground space-y-1">
+                  <p>This will delete:</p>
+                  <ul className="list-disc list-inside space-y-0.5 text-xs">
+                    <li>All registered devices</li>
+                    <li>All uplink data</li>
+                    <li>All downlink history</li>
+                    <li>All gateway records</li>
+                    <li>Active MQTT connection</li>
+                  </ul>
+                </div>
+
+                <p className="text-sm mb-2">
+                  Type <span className="font-mono font-semibold text-red-500">{selectedApplication.applicationId}</span> to confirm:
+                </p>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  className="w-full px-3 py-2 border border-border/50 rounded-lg bg-background/50 font-mono text-sm mb-4"
+                  placeholder={selectedApplication.applicationId}
+                  autoFocus
+                />
+
+                <div className="flex gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(''); }}
+                    className="flex-1"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={deleteConfirmText !== selectedApplication.applicationId}
+                    onClick={() => {
+                      dispatch(deleteTTNApplication(selectedApplication._id));
+                      setShowDeleteConfirm(false);
+                      setDeleteConfirmText('');
+                    }}
+                    className="flex-1 bg-red-500 hover:bg-red-600 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete Permanently
+                  </Button>
+                </div>
               </motion.div>
             </motion.div>
           )}

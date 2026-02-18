@@ -10,7 +10,25 @@ import { TTNDevice } from '../models/TTNDevice';
 import { TTNUplink } from '../models/TTNUplink';
 import { TTNDownlink } from '../models/TTNDownlink';
 import { TTNGateway } from '../models/TTNGateway';
-import { ttnService, TTNConfig } from '../services/ttnService';
+import { ttnService, TTNConfig, TTNAuthError, TTNRateLimitError, TTNNetworkError } from '../services/ttnService';
+import { ttnMqttService } from '../services/ttnMqttService';
+
+/**
+ * Map TTN service errors to appropriate HTTP responses
+ */
+function handleTTNError(res: Response, error: unknown, fallbackMessage: string) {
+  if (error instanceof TTNAuthError) {
+    return res.status(401).json({ error: error.message });
+  }
+  if (error instanceof TTNRateLimitError) {
+    return res.status(429).json({ error: error.message });
+  }
+  if (error instanceof TTNNetworkError) {
+    return res.status(502).json({ error: error.message });
+  }
+  const message = error instanceof Error ? error.message : fallbackMessage;
+  return res.status(500).json({ error: message });
+}
 
 /**
  * Get all TTN applications for the current user
@@ -75,8 +93,7 @@ export const createApplication = async (req: Request, res: Response) => {
         return res.status(400).json({ error: 'Could not verify TTN application. Check your API key and application ID.' });
       }
     } catch (ttnError: unknown) {
-      const errorMessage = ttnError instanceof Error ? ttnError.message : 'Unknown error';
-      return res.status(400).json({ error: `TTN connection failed: ${errorMessage}` });
+      return handleTTNError(res, ttnError, 'TTN connection failed');
     }
 
     // Generate webhook secret
@@ -93,17 +110,28 @@ export const createApplication = async (req: Request, res: Response) => {
       isActive: true,
     });
 
+    // Encrypt and store the API key
+    application.setApiKey(apiKey);
     await application.save();
 
-    // Store API key securely (in production, use a secrets manager)
-    // For now, we'll re-initialize on each request using stored config
+    // Connect MQTT for this app immediately
+    try {
+      await ttnMqttService.connect({
+        region: ttnRegion || 'eu1',
+        applicationId,
+        apiKey,
+      });
+      console.log(`[TTN] MQTT connected for new application: ${applicationId}`);
+    } catch (mqttErr) {
+      console.warn(`[TTN] MQTT connection failed for ${applicationId}:`, mqttErr);
+    }
 
     res.status(201).json({
       success: true,
       application,
       webhookUrl: `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/ttn/webhook/${applicationId}`,
       webhookSecret,
-      message: 'Application registered. Configure the webhook URL in TTN Console.',
+      message: 'Application registered. API key saved securely.',
     });
   } catch (error) {
     console.error('Error creating TTN application:', error);
@@ -136,6 +164,67 @@ export const updateApplication = async (req: Request, res: Response) => {
 };
 
 /**
+ * Update the API key for a TTN application
+ */
+export const updateApiKey = async (req: Request, res: Response) => {
+  try {
+    const { apiKey } = req.body;
+
+    if (!apiKey) {
+      return res.status(400).json({ error: 'API key is required' });
+    }
+
+    const application = await TTNApplication.findOne({
+      _id: req.params.id,
+      owner: req.user._id,
+    }).select('+apiKeyEncrypted');
+
+    if (!application) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+
+    // Verify the new key with TTN
+    const config: TTNConfig = {
+      region: application.ttnRegion,
+      applicationId: application.applicationId,
+      apiKey,
+    };
+
+    ttnService.initialize(config);
+
+    try {
+      const ttnApp = await ttnService.getApplication();
+      if (!ttnApp) {
+        return res.status(400).json({ error: 'Could not verify TTN application with new API key.' });
+      }
+    } catch (ttnError: unknown) {
+      return handleTTNError(res, ttnError, 'TTN verification failed with new key');
+    }
+
+    // Store the new key
+    application.setApiKey(apiKey);
+    await application.save();
+
+    // Reconnect MQTT with new key
+    ttnMqttService.disconnect(application.applicationId);
+    try {
+      await ttnMqttService.connect({
+        region: application.ttnRegion,
+        applicationId: application.applicationId,
+        apiKey,
+      });
+    } catch (mqttErr) {
+      console.warn(`[TTN] MQTT reconnect failed for ${application.applicationId}:`, mqttErr);
+    }
+
+    res.json({ success: true, message: 'API key updated successfully' });
+  } catch (error) {
+    console.error('Error updating TTN API key:', error);
+    res.status(500).json({ error: 'Failed to update API key' });
+  }
+};
+
+/**
  * Delete a TTN application
  */
 export const deleteApplication = async (req: Request, res: Response) => {
@@ -151,6 +240,9 @@ export const deleteApplication = async (req: Request, res: Response) => {
     }
 
     const appId = application.applicationId;
+
+    // Disconnect MQTT for this app
+    ttnMqttService.disconnect(appId);
 
     // Delete the application
     await TTNApplication.deleteOne({ _id: req.params.id });
@@ -175,15 +267,21 @@ export const deleteApplication = async (req: Request, res: Response) => {
  */
 export const syncDevices = async (req: Request, res: Response) => {
   try {
-    const { applicationId, apiKey } = req.body;
+    const { applicationId } = req.body;
 
     const application = await TTNApplication.findOne({
       applicationId,
       owner: req.user._id,
-    });
+    }).select('+apiKeyEncrypted');
 
     if (!application) {
       return res.status(404).json({ error: 'Application not found' });
+    }
+
+    // Use stored key; fall back to request body for backward compat
+    const apiKey = application.getApiKey() || req.body.apiKey;
+    if (!apiKey) {
+      return res.status(400).json({ error: 'No API key available. Please update the API key for this application.' });
     }
 
     // Initialize TTN service
@@ -196,7 +294,12 @@ export const syncDevices = async (req: Request, res: Response) => {
     ttnService.initialize(config);
 
     // Fetch devices from TTN
-    const ttnDevices = await ttnService.getDevices();
+    let ttnDevices;
+    try {
+      ttnDevices = await ttnService.getDevices();
+    } catch (ttnError: unknown) {
+      return handleTTNError(res, ttnError, 'Failed to fetch devices from TTN');
+    }
 
     // Sync devices to database
     const syncedDevices = [];
@@ -328,7 +431,7 @@ export const getUplinks = async (req: Request, res: Response) => {
 export const sendDownlink = async (req: Request, res: Response) => {
   try {
     const { applicationId, deviceId } = req.params;
-    const { fPort, payload, confirmed, priority, apiKey } = req.body;
+    const { fPort, payload, confirmed, priority } = req.body;
 
     // Verify device exists and belongs to user
     const device = await TTNDevice.findOne({
@@ -341,14 +444,20 @@ export const sendDownlink = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Device not found' });
     }
 
-    // Get application for region
+    // Get application for region + stored key
     const application = await TTNApplication.findOne({
       applicationId,
       owner: req.user._id,
-    });
+    }).select('+apiKeyEncrypted');
 
     if (!application) {
       return res.status(404).json({ error: 'Application not found' });
+    }
+
+    // Use stored key; fall back to request body for backward compat
+    const apiKey = application.getApiKey() || req.body.apiKey;
+    if (!apiKey) {
+      return res.status(400).json({ error: 'No API key available. Please update the API key for this application.' });
     }
 
     // Initialize TTN service
@@ -417,8 +526,7 @@ export const sendDownlink = async (req: Request, res: Response) => {
       downlink.failureReason = ttnError instanceof Error ? ttnError.message : 'Unknown error';
       await downlink.save();
 
-      const errorMessage = ttnError instanceof Error ? ttnError.message : 'Unknown error';
-      res.status(500).json({ error: `Failed to send downlink: ${errorMessage}` });
+      return handleTTNError(res, ttnError, 'Failed to send downlink');
     }
   } catch (error) {
     console.error('Error sending TTN downlink:', error);
@@ -432,7 +540,7 @@ export const sendDownlink = async (req: Request, res: Response) => {
 export const getDownlinks = async (req: Request, res: Response) => {
   try {
     const { applicationId, deviceId } = req.params;
-    const { limit = 50, offset = 0 } = req.query;
+    const { limit = 50, offset = 0, startDate, endDate } = req.query;
 
     const query: Record<string, unknown> = {
       applicationId,
@@ -441,6 +549,12 @@ export const getDownlinks = async (req: Request, res: Response) => {
 
     if (deviceId && deviceId !== 'all') {
       query.deviceId = deviceId;
+    }
+
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) (query.createdAt as Record<string, unknown>).$gte = new Date(startDate as string);
+      if (endDate) (query.createdAt as Record<string, unknown>).$lte = new Date(endDate as string);
     }
 
     const downlinks = await TTNDownlink.find(query)
@@ -622,6 +736,222 @@ export const getGateway = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error fetching TTN gateway:', error);
     res.status(500).json({ error: 'Failed to fetch gateway' });
+  }
+};
+
+/**
+ * Get unified logs (uplinks + downlinks merged by timestamp)
+ */
+export const getLogs = async (req: Request, res: Response) => {
+  try {
+    const { applicationId } = req.params;
+    const {
+      startDate,
+      endDate,
+      deviceId,
+      gatewayId,
+      eventType = 'all',
+      limit = 100,
+      offset = 0,
+    } = req.query;
+
+    const maxLimit = Math.min(Number(limit), 500);
+    const skip = Number(offset);
+
+    // Default to last 24 hours if no dates provided
+    const now = new Date();
+    const start = startDate ? new Date(startDate as string) : new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const end = endDate ? new Date(endDate as string) : now;
+
+    const baseQuery: Record<string, unknown> = {
+      applicationId,
+      owner: req.user._id,
+    };
+
+    if (deviceId && deviceId !== 'all') {
+      baseQuery.deviceId = deviceId as string;
+    }
+
+    let uplinkResults: Array<Record<string, unknown>> = [];
+    let downlinkResults: Array<Record<string, unknown>> = [];
+    let uplinkTotal = 0;
+    let downlinkTotal = 0;
+
+    if (eventType === 'all' || eventType === 'uplink') {
+      const uplinkQuery = {
+        ...baseQuery,
+        receivedAt: { $gte: start, $lte: end },
+      };
+      if (gatewayId) {
+        (uplinkQuery as Record<string, unknown>).gatewayId = gatewayId as string;
+      }
+      [uplinkResults, uplinkTotal] = await Promise.all([
+        TTNUplink.find(uplinkQuery).sort({ receivedAt: -1 }).lean(),
+        TTNUplink.countDocuments(uplinkQuery),
+      ]);
+    }
+
+    if (eventType === 'all' || eventType === 'downlink') {
+      const downlinkQuery = {
+        ...baseQuery,
+        createdAt: { $gte: start, $lte: end },
+      };
+      [downlinkResults, downlinkTotal] = await Promise.all([
+        TTNDownlink.find(downlinkQuery).sort({ createdAt: -1 }).lean(),
+        TTNDownlink.countDocuments(downlinkQuery),
+      ]);
+    }
+
+    // Merge and sort by timestamp
+    const merged = [
+      ...uplinkResults.map((u) => ({
+        ...u,
+        _type: 'uplink' as const,
+        _timestamp: (u.receivedAt as Date).toISOString(),
+      })),
+      ...downlinkResults.map((d) => ({
+        ...d,
+        _type: 'downlink' as const,
+        _timestamp: (d.createdAt as Date).toISOString(),
+      })),
+    ].sort((a, b) => new Date(b._timestamp).getTime() - new Date(a._timestamp).getTime());
+
+    const total = uplinkTotal + downlinkTotal;
+    const paginated = merged.slice(skip, skip + maxLimit);
+
+    res.json({
+      logs: paginated,
+      total,
+      limit: maxLimit,
+      offset: skip,
+    });
+  } catch (error) {
+    console.error('Error fetching TTN logs:', error);
+    res.status(500).json({ error: 'Failed to fetch logs' });
+  }
+};
+
+/**
+ * Export logs as CSV or JSON
+ */
+export const exportLogs = async (req: Request, res: Response) => {
+  try {
+    const { applicationId } = req.params;
+    const {
+      startDate,
+      endDate,
+      deviceId,
+      gatewayId,
+      eventType = 'all',
+      format = 'json',
+    } = req.query;
+
+    const MAX_EXPORT = 10000;
+
+    const now = new Date();
+    const start = startDate ? new Date(startDate as string) : new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const end = endDate ? new Date(endDate as string) : now;
+
+    const baseQuery: Record<string, unknown> = {
+      applicationId,
+      owner: req.user._id,
+    };
+
+    if (deviceId && deviceId !== 'all') {
+      baseQuery.deviceId = deviceId as string;
+    }
+
+    let uplinkResults: Array<Record<string, unknown>> = [];
+    let downlinkResults: Array<Record<string, unknown>> = [];
+
+    if (eventType === 'all' || eventType === 'uplink') {
+      const uplinkQuery = {
+        ...baseQuery,
+        receivedAt: { $gte: start, $lte: end },
+      };
+      if (gatewayId) {
+        (uplinkQuery as Record<string, unknown>).gatewayId = gatewayId as string;
+      }
+      uplinkResults = await TTNUplink.find(uplinkQuery)
+        .sort({ receivedAt: -1 })
+        .limit(MAX_EXPORT)
+        .lean();
+    }
+
+    if (eventType === 'all' || eventType === 'downlink') {
+      const downlinkQuery = {
+        ...baseQuery,
+        createdAt: { $gte: start, $lte: end },
+      };
+      downlinkResults = await TTNDownlink.find(downlinkQuery)
+        .sort({ createdAt: -1 })
+        .limit(MAX_EXPORT)
+        .lean();
+    }
+
+    if (format === 'csv') {
+      const csvEscape = (val: unknown): string => {
+        const str = val == null ? '' : String(val);
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      };
+
+      const header = 'Type,Timestamp,Device ID,fPort,Payload,RSSI,SNR,SF,Frequency,Gateway,Status';
+      const rows: string[] = [];
+
+      for (const u of uplinkResults) {
+        rows.push([
+          'uplink',
+          csvEscape((u.receivedAt as Date)?.toISOString()),
+          csvEscape(u.deviceId),
+          csvEscape(u.fPort),
+          csvEscape(u.rawPayload),
+          csvEscape(u.rssi),
+          csvEscape(u.snr),
+          csvEscape(u.spreadingFactor),
+          csvEscape(u.frequency),
+          csvEscape(u.gatewayId),
+          '',
+        ].join(','));
+      }
+
+      for (const d of downlinkResults) {
+        rows.push([
+          'downlink',
+          csvEscape((d.createdAt as Date)?.toISOString()),
+          csvEscape(d.deviceId),
+          csvEscape(d.fPort),
+          csvEscape(d.payload),
+          '',
+          '',
+          '',
+          '',
+          '',
+          csvEscape(d.status),
+        ].join(','));
+      }
+
+      // Sort by timestamp descending
+      const csv = header + '\n' + rows.join('\n');
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="ttn-logs-${applicationId}-${Date.now()}.csv"`);
+      return res.send(csv);
+    }
+
+    // JSON format
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="ttn-logs-${applicationId}-${Date.now()}.json"`);
+    res.json({
+      uplinks: uplinkResults,
+      downlinks: downlinkResults,
+      exportedAt: new Date().toISOString(),
+      applicationId,
+    });
+  } catch (error) {
+    console.error('Error exporting TTN logs:', error);
+    res.status(500).json({ error: 'Failed to export logs' });
   }
 };
 

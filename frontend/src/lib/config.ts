@@ -68,6 +68,8 @@ export const API_ENDPOINTS = {
   TTN_GATEWAY_DETAIL: (appId: string, gwId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/gateways/${gwId}`,
   TTN_GATEWAY_STATS: (appId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/gateway-stats`,
   TTN_STATS: (appId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/stats`,
+  TTN_LOGS: (appId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/logs`,
+  TTN_LOGS_EXPORT: (appId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/logs/export`,
 };
 
 // Socket.io Configuration

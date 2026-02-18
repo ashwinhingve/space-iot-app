@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import crypto from 'crypto';
+import { encrypt, decrypt } from '../utils/encryption';
 
 export interface IWiFiConfig extends mongoose.Document {
   deviceId: string;
@@ -50,41 +51,14 @@ const wifiConfigSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Encryption algorithm
-const ALGORITHM = 'aes-256-cbc';
-const IV_LENGTH = 16;
-
-// Get encryption key as Buffer
-const getEncryptionKey = (): Buffer => {
-  if (!process.env.WIFI_ENCRYPTION_KEY) {
-    throw new Error(
-      'WIFI_ENCRYPTION_KEY environment variable is required. ' +
-      'Generate one with: openssl rand -hex 32'
-    );
-  }
-  return Buffer.from(process.env.WIFI_ENCRYPTION_KEY, 'hex');
-};
-
-const ENCRYPTION_KEY = getEncryptionKey();
-
 // Method to encrypt password before saving
 wifiConfigSchema.methods.encryptPassword = function(password: string): string {
-  const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
-  let encrypted = cipher.update(password, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  return iv.toString('hex') + ':' + encrypted;
+  return encrypt(password);
 };
 
 // Method to decrypt password when needed
 wifiConfigSchema.methods.decryptPassword = function(encryptedPassword: string): string {
-  const parts = encryptedPassword.split(':');
-  const iv = Buffer.from(parts[0], 'hex');
-  const encryptedText = parts[1];
-  const decipher = crypto.createDecipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
-  let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return decrypted;
+  return decrypt(encryptedPassword);
 };
 
 // Generate API key before saving if not exists

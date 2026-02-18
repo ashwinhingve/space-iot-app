@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { encrypt, decrypt } from '../utils/encryption';
 
 export interface ITTNApplication extends mongoose.Document {
   applicationId: string;
@@ -6,12 +7,16 @@ export interface ITTNApplication extends mongoose.Document {
   description?: string;
   owner: mongoose.Types.ObjectId;
   ttnRegion: string;
+  apiKeyEncrypted?: string;
   webhookId?: string;
   webhookSecret?: string;
   isActive: boolean;
   lastSync?: Date;
   createdAt: Date;
   updatedAt: Date;
+  hasApiKey: boolean;
+  setApiKey(plainKey: string): void;
+  getApiKey(): string | null;
 }
 
 const ttnApplicationSchema = new mongoose.Schema({
@@ -41,6 +46,10 @@ const ttnApplicationSchema = new mongoose.Schema({
     enum: ['eu1', 'nam1', 'au1'],
     default: 'eu1'
   },
+  apiKeyEncrypted: {
+    type: String,
+    select: false
+  },
   webhookId: {
     type: String,
     trim: true
@@ -57,8 +66,26 @@ const ttnApplicationSchema = new mongoose.Schema({
     type: Date
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
 });
+
+// Virtual: hasApiKey
+ttnApplicationSchema.virtual('hasApiKey').get(function () {
+  return !!this.apiKeyEncrypted;
+});
+
+// Instance method: encrypt and store API key
+ttnApplicationSchema.methods.setApiKey = function (plainKey: string): void {
+  this.apiKeyEncrypted = encrypt(plainKey);
+};
+
+// Instance method: decrypt and return API key
+ttnApplicationSchema.methods.getApiKey = function (): string | null {
+  if (!this.apiKeyEncrypted) return null;
+  return decrypt(this.apiKeyEncrypted);
+};
 
 // Index for faster queries
 ttnApplicationSchema.index({ owner: 1 });

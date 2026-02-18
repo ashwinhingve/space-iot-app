@@ -1,7 +1,7 @@
 /**
  * TTN MQTT Service
  * Connects to TTN's MQTT broker to receive uplinks in real-time
- * No public URL / tunnel needed - connection is outbound from our server
+ * Supports multiple application connections simultaneously
  *
  * TTN MQTT docs: https://www.thethingsindustries.com/docs/integrations/mqtt/
  */
@@ -20,10 +20,8 @@ interface TTNMqttConfig {
 }
 
 class TTNMqttService {
-  private client: MqttClient | null = null;
+  private clients: Map<string, MqttClient> = new Map();
   private io: SocketIOServer | null = null;
-  private config: TTNMqttConfig | null = null;
-  private reconnectTimer: NodeJS.Timeout | null = null;
 
   /**
    * Set the Socket.io server instance for real-time updates
@@ -33,15 +31,14 @@ class TTNMqttService {
   }
 
   /**
-   * Connect to TTN MQTT broker
+   * Connect to TTN MQTT broker for a specific application
    */
   async connect(config: TTNMqttConfig): Promise<void> {
-    this.config = config;
-
-    // Disconnect existing connection
-    if (this.client) {
-      this.client.end(true);
-      this.client = null;
+    // Disconnect existing connection for this app if any
+    if (this.clients.has(config.applicationId)) {
+      const existing = this.clients.get(config.applicationId)!;
+      existing.end(true);
+      this.clients.delete(config.applicationId);
     }
 
     const mqttUrl = `mqtts://${config.region}.cloud.thethings.network:8883`;
@@ -50,7 +47,7 @@ class TTNMqttService {
     console.log(`[TTN MQTT] Connecting to ${mqttUrl} as ${username}...`);
 
     return new Promise((resolve, reject) => {
-      this.client = mqtt.connect(mqttUrl, {
+      const client = mqtt.connect(mqttUrl, {
         username,
         password: config.apiKey,
         clientId: `iotspace-${config.applicationId}-${Date.now()}`,
@@ -60,14 +57,14 @@ class TTNMqttService {
         rejectUnauthorized: true,
       });
 
-      this.client.on('connect', () => {
-        console.log(`[TTN MQTT] Connected to TTN for application: ${config.applicationId}`);
+      client.on('connect', () => {
+        console.log(`[TTN MQTT] Connected for application: ${config.applicationId}`);
 
         // Subscribe to uplink messages
         const uplinkTopic = `v3/${config.applicationId}@ttn/devices/+/up`;
-        this.client!.subscribe(uplinkTopic, { qos: 0 }, (err) => {
+        client.subscribe(uplinkTopic, { qos: 0 }, (err) => {
           if (err) {
-            console.error(`[TTN MQTT] Subscribe error:`, err);
+            console.error(`[TTN MQTT] Subscribe error for ${config.applicationId}:`, err);
           } else {
             console.log(`[TTN MQTT] Subscribed to: ${uplinkTopic}`);
           }
@@ -81,13 +78,14 @@ class TTNMqttService {
           `v3/${config.applicationId}@ttn/devices/+/join`,
         ];
         downlinkTopics.forEach((topic) => {
-          this.client!.subscribe(topic, { qos: 0 });
+          client.subscribe(topic, { qos: 0 });
         });
 
+        this.clients.set(config.applicationId, client);
         resolve();
       });
 
-      this.client.on('message', async (topic, message) => {
+      client.on('message', async (topic, message) => {
         try {
           const payload = JSON.parse(message.toString());
           await this.handleMessage(topic, payload);
@@ -96,26 +94,39 @@ class TTNMqttService {
         }
       });
 
-      this.client.on('error', (err) => {
-        console.error(`[TTN MQTT] Connection error:`, err.message);
+      client.on('error', (err) => {
+        console.error(`[TTN MQTT] Connection error for ${config.applicationId}:`, err.message);
         reject(err);
       });
 
-      this.client.on('close', () => {
-        console.log(`[TTN MQTT] Connection closed`);
+      client.on('close', () => {
+        console.log(`[TTN MQTT] Connection closed for ${config.applicationId}`);
       });
 
-      this.client.on('reconnect', () => {
-        console.log(`[TTN MQTT] Reconnecting...`);
+      client.on('reconnect', () => {
+        console.log(`[TTN MQTT] Reconnecting ${config.applicationId}...`);
       });
 
       // Timeout for initial connection
       setTimeout(() => {
-        if (!this.client?.connected) {
-          reject(new Error('TTN MQTT connection timeout'));
+        if (!client.connected) {
+          reject(new Error(`TTN MQTT connection timeout for ${config.applicationId}`));
         }
       }, 15000);
     });
+  }
+
+  /**
+   * Connect all active apps on startup
+   */
+  async connectAll(apps: TTNMqttConfig[]): Promise<void> {
+    const results = await Promise.allSettled(
+      apps.map((app) => this.connect(app))
+    );
+
+    const succeeded = results.filter((r) => r.status === 'fulfilled').length;
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    console.log(`[TTN MQTT] Connected ${succeeded}/${apps.length} applications (${failed} failed)`);
   }
 
   /**
@@ -142,8 +153,6 @@ class TTNMqttService {
    * Handle uplink messages
    */
   private async handleUplink(payload: Record<string, unknown>): Promise<void> {
-    if (!this.config) return;
-
     try {
       const endDeviceIds = payload.end_device_ids as Record<string, unknown>;
       const uplinkMessage = payload.uplink_message as Record<string, unknown>;
@@ -377,24 +386,49 @@ class TTNMqttService {
   }
 
   /**
-   * Check if connected
+   * Check if a specific application is connected
    */
-  isConnected(): boolean {
-    return this.client?.connected || false;
+  isConnected(applicationId?: string): boolean {
+    if (applicationId) {
+      return this.clients.get(applicationId)?.connected || false;
+    }
+    // Return true if any connection is active
+    for (const client of this.clients.values()) {
+      if (client.connected) return true;
+    }
+    return false;
   }
 
   /**
-   * Disconnect from TTN MQTT
+   * Get list of connected application IDs
    */
-  disconnect(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
+  getConnectedApps(): string[] {
+    const connected: string[] = [];
+    for (const [appId, client] of this.clients.entries()) {
+      if (client.connected) connected.push(appId);
     }
-    if (this.client) {
-      this.client.end(true);
-      this.client = null;
-      console.log('[TTN MQTT] Disconnected');
+    return connected;
+  }
+
+  /**
+   * Disconnect from TTN MQTT - one app or all
+   */
+  disconnect(applicationId?: string): void {
+    if (applicationId) {
+      const client = this.clients.get(applicationId);
+      if (client) {
+        client.end(true);
+        this.clients.delete(applicationId);
+        console.log(`[TTN MQTT] Disconnected: ${applicationId}`);
+      }
+    } else {
+      // Disconnect all
+      for (const [appId, client] of this.clients.entries()) {
+        client.end(true);
+        console.log(`[TTN MQTT] Disconnected: ${appId}`);
+      }
+      this.clients.clear();
+      console.log('[TTN MQTT] All connections closed');
     }
   }
 }

@@ -10,6 +10,7 @@ import {
   getApplication,
   createApplication,
   updateApplication,
+  updateApiKey,
   deleteApplication,
   syncDevices,
   getDevices,
@@ -17,6 +18,8 @@ import {
   getUplinks,
   sendDownlink,
   getDownlinks,
+  getLogs,
+  exportLogs,
   getStats,
   getGateways,
   getGateway,
@@ -33,6 +36,7 @@ router.get('/applications', getApplications);
 router.get('/applications/:id', getApplication);
 router.post('/applications', createApplication);
 router.put('/applications/:id', updateApplication);
+router.put('/applications/:id/api-key', updateApiKey);
 router.delete('/applications/:id', deleteApplication);
 
 // Device sync
@@ -50,6 +54,10 @@ router.get('/applications/:applicationId/devices/:deviceId/uplinks', getUplinks)
 router.post('/applications/:applicationId/devices/:deviceId/downlink', sendDownlink);
 router.get('/applications/:applicationId/downlinks', getDownlinks);
 router.get('/applications/:applicationId/devices/:deviceId/downlinks', getDownlinks);
+
+// Logs routes (unified uplink + downlink)
+router.get('/applications/:applicationId/logs', getLogs);
+router.get('/applications/:applicationId/logs/export', exportLogs);
 
 // Gateway routes
 router.get('/applications/:applicationId/gateways', getGateways);

@@ -97,4 +97,7 @@ const ttnDownlinkSchema = new mongoose.Schema({
 ttnDownlinkSchema.index({ deviceId: 1, createdAt: -1 });
 ttnDownlinkSchema.index({ correlationId: 1 });
 
+// TTL index: auto-delete after 30 days
+ttnDownlinkSchema.index({ createdAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 });
+
 export const TTNDownlink = mongoose.model<ITTNDownlink>('TTNDownlink', ttnDownlinkSchema);

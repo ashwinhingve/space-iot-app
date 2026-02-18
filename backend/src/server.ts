@@ -27,6 +27,9 @@ import { ValveCommand } from './models/ValveCommand';
 import { validateEnv, getEnvConfig } from './utils/validateEnv';
 import { awsIotService, AwsIotConfig } from './services/awsIotService';
 import { ttnMqttService } from './services/ttnMqttService';
+import { TTNApplication } from './models/TTNApplication';
+import { TTNDevice } from './models/TTNDevice';
+import { ttnService } from './services/ttnService';
 
 // Load environment variables
 dotenv.config();
@@ -596,28 +599,75 @@ async function startServer() {
   // Store Socket.io instance in app for webhook routes
   app.set('io', io);
 
-  // Initialize TTN MQTT connection if credentials are configured
-  const ttnApiKey = process.env.TTN_API_KEY;
-  const ttnAppId = process.env.TTN_APPLICATION_ID;
-  const ttnRegion = process.env.TTN_REGION || 'eu1';
+  // Initialize TTN MQTT connections for all active apps with stored API keys
+  ttnMqttService.setSocketIO(io);
 
-  if (ttnApiKey && ttnAppId && ttnApiKey !== 'your-ttn-api-key-here') {
-    try {
-      ttnMqttService.setSocketIO(io);
-      await ttnMqttService.connect({
-        region: ttnRegion,
-        applicationId: ttnAppId,
-        apiKey: ttnApiKey,
-      });
-      console.log(`TTN MQTT connected for application: ${ttnAppId}`);
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      console.warn(`TTN MQTT connection failed: ${errMsg}`);
-      console.warn('TTN uplinks will not be received. Check your TTN_API_KEY and TTN_APPLICATION_ID.');
+  try {
+    const ttnApps = await TTNApplication.find({ isActive: true }).select('+apiKeyEncrypted');
+    const appsToConnect = ttnApps
+      .filter((app) => app.apiKeyEncrypted)
+      .map((app) => ({
+        region: app.ttnRegion,
+        applicationId: app.applicationId,
+        apiKey: app.getApiKey()!,
+      }));
+
+    if (appsToConnect.length > 0) {
+      await ttnMqttService.connectAll(appsToConnect);
+    } else {
+      console.log('[TTN] No applications with stored API keys found');
     }
-  } else {
-    console.log('TTN MQTT not configured (set TTN_API_KEY and TTN_APPLICATION_ID in .env)');
+  } catch (err) {
+    console.warn('[TTN] Error connecting MQTT on startup:', err);
   }
+
+  // Periodic TTN sync every 5 minutes
+  setInterval(async () => {
+    try {
+      const apps = await TTNApplication.find({ isActive: true }).select('+apiKeyEncrypted');
+      for (const app of apps) {
+        const apiKey = app.getApiKey();
+        if (!apiKey) continue;
+
+        try {
+          ttnService.initialize({
+            region: app.ttnRegion,
+            applicationId: app.applicationId,
+            apiKey,
+          });
+
+          const ttnDevices = await ttnService.getDevices();
+          for (const ttnDevice of ttnDevices) {
+            await TTNDevice.findOneAndUpdate(
+              { deviceId: ttnDevice.ids.device_id, applicationId: app.applicationId },
+              {
+                $set: {
+                  deviceId: ttnDevice.ids.device_id,
+                  applicationId: app.applicationId,
+                  owner: app.owner,
+                  name: ttnDevice.name || ttnDevice.ids.device_id,
+                  description: ttnDevice.description,
+                  devEui: ttnDevice.ids.dev_eui,
+                  joinEui: ttnDevice.ids.join_eui,
+                  devAddr: ttnDevice.ids.dev_addr,
+                  attributes: ttnDevice.attributes,
+                },
+              },
+              { upsert: true }
+            );
+          }
+
+          app.lastSync = new Date();
+          await app.save();
+          console.log(`[TTN Sync] ${app.applicationId}: ${ttnDevices.length} devices synced`);
+        } catch (syncErr) {
+          console.warn(`[TTN Sync] Error syncing ${app.applicationId}:`, syncErr);
+        }
+      }
+    } catch (err) {
+      console.error('[TTN Sync] Periodic sync error:', err);
+    }
+  }, 5 * 60 * 1000);
 
   // Start HTTP server
   httpServer.listen(config.port, '0.0.0.0', () => {

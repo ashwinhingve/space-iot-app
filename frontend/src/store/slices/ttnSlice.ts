@@ -10,6 +10,7 @@ export interface TTNApplication {
   ttnRegion: string;
   webhookId?: string;
   isActive: boolean;
+  hasApiKey: boolean;
   lastSync?: string;
   createdAt: string;
   updatedAt: string;
@@ -141,6 +142,36 @@ export interface TTNDownlink {
   createdAt: string;
 }
 
+export interface TTNLogEntry {
+  _id: string;
+  _type: 'uplink' | 'downlink';
+  _timestamp: string;
+  deviceId: string;
+  applicationId: string;
+  // Uplink fields
+  rawPayload?: string;
+  rssi?: number;
+  snr?: number;
+  spreadingFactor?: number;
+  frequency?: number;
+  gatewayId?: string;
+  gateways?: Array<{
+    gatewayId: string;
+    rssi: number;
+    snr: number;
+  }>;
+  receivedAt?: string;
+  fPort?: number;
+  fCnt?: number;
+  // Downlink fields
+  payload?: string;
+  status?: 'PENDING' | 'SCHEDULED' | 'SENT' | 'ACKNOWLEDGED' | 'FAILED';
+  correlationId?: string;
+  confirmed?: boolean;
+  priority?: string;
+  createdAt?: string;
+}
+
 export interface TTNStats {
   summary: {
     totalDevices: number;
@@ -177,6 +208,8 @@ interface TTNState {
   gatewayStats: TTNGatewayStats | null;
   uplinks: TTNUplink[];
   downlinks: TTNDownlink[];
+  logs: TTNLogEntry[];
+  logsTotal: number;
   stats: TTNStats | null;
   loading: boolean;
   syncLoading: boolean;
@@ -193,6 +226,8 @@ const initialState: TTNState = {
   gatewayStats: null,
   uplinks: [],
   downlinks: [],
+  logs: [],
+  logsTotal: 0,
   stats: null,
   loading: false,
   syncLoading: false,
@@ -271,12 +306,12 @@ export const deleteTTNApplication = createAsyncThunk(
 
 export const syncTTNDevices = createAsyncThunk(
   'ttn/syncDevices',
-  async ({ applicationId, apiKey }: { applicationId: string; apiKey: string }, { rejectWithValue }) => {
+  async ({ applicationId }: { applicationId: string }, { rejectWithValue }) => {
     try {
       const response = await fetch(API_ENDPOINTS.TTN_SYNC_DEVICES(applicationId), {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ applicationId, apiKey }),
+        body: JSON.stringify({ applicationId }),
       });
       if (!response.ok) {
         const error = await response.json();
@@ -354,7 +389,6 @@ export const sendTTNDownlink = createAsyncThunk(
       payload,
       confirmed,
       priority,
-      apiKey,
     }: {
       applicationId: string;
       deviceId: string;
@@ -362,7 +396,6 @@ export const sendTTNDownlink = createAsyncThunk(
       payload: string;
       confirmed?: boolean;
       priority?: string;
-      apiKey: string;
     },
     { rejectWithValue }
   ) => {
@@ -370,7 +403,7 @@ export const sendTTNDownlink = createAsyncThunk(
       const response = await fetch(API_ENDPOINTS.TTN_SEND_DOWNLINK(applicationId, deviceId), {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ fPort, payload, confirmed, priority, apiKey }),
+        body: JSON.stringify({ fPort, payload, confirmed, priority }),
       });
       if (!response.ok) {
         const error = await response.json();
@@ -424,6 +457,66 @@ export const fetchTTNGatewayStats = createAsyncThunk(
       return await response.json();
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : 'Failed to fetch gateway stats');
+    }
+  }
+);
+
+export const updateTTNApiKey = createAsyncThunk(
+  'ttn/updateApiKey',
+  async ({ id, apiKey }: { id: string; apiKey: string }, { rejectWithValue }) => {
+    try {
+      const response = await fetch(`${API_ENDPOINTS.TTN_APPLICATION_DETAIL(id)}/api-key`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ apiKey }),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to update API key');
+      }
+      return { id, ...(await response.json()) };
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Failed to update API key');
+    }
+  }
+);
+
+export const fetchTTNLogs = createAsyncThunk(
+  'ttn/fetchLogs',
+  async (
+    {
+      applicationId,
+      startDate,
+      endDate,
+      deviceId,
+      gatewayId,
+      eventType,
+      limit = 200,
+    }: {
+      applicationId: string;
+      startDate?: string;
+      endDate?: string;
+      deviceId?: string;
+      gatewayId?: string;
+      eventType?: string;
+      limit?: number;
+    },
+    { rejectWithValue }
+  ) => {
+    try {
+      const params = new URLSearchParams();
+      if (startDate) params.set('startDate', startDate);
+      if (endDate) params.set('endDate', endDate);
+      if (deviceId && deviceId !== 'all') params.set('deviceId', deviceId);
+      if (gatewayId) params.set('gatewayId', gatewayId);
+      if (eventType && eventType !== 'all') params.set('eventType', eventType);
+      params.set('limit', String(limit));
+      const url = `${API_ENDPOINTS.TTN_LOGS(applicationId)}?${params.toString()}`;
+      const response = await fetch(url, { headers: getAuthHeaders() });
+      if (!response.ok) throw new Error('Failed to fetch logs');
+      return await response.json();
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Failed to fetch logs');
     }
   }
 );
@@ -491,6 +584,12 @@ const ttnSlice = createSlice({
           gw.isOnline = true;
           gw.lastSeen = new Date().toISOString();
         }
+      }
+    },
+    addLogEntry: (state, action: PayloadAction<TTNLogEntry>) => {
+      state.logs.unshift(action.payload);
+      if (state.logs.length > 200) {
+        state.logs = state.logs.slice(0, 200);
       }
     },
     clearError: (state) => {
@@ -567,6 +666,11 @@ const ttnSlice = createSlice({
       .addCase(fetchTTNUplinks.fulfilled, (state, action) => {
         state.uplinks = action.payload;
       })
+      // Fetch Logs
+      .addCase(fetchTTNLogs.fulfilled, (state, action) => {
+        state.logs = action.payload.logs;
+        state.logsTotal = action.payload.total;
+      })
       // Fetch Downlinks
       .addCase(fetchTTNDownlinks.fulfilled, (state, action) => {
         state.downlinks = action.payload;
@@ -596,6 +700,25 @@ const ttnSlice = createSlice({
       // Fetch Gateway Stats
       .addCase(fetchTTNGatewayStats.fulfilled, (state, action) => {
         state.gatewayStats = action.payload;
+      })
+      // Update API Key
+      .addCase(updateTTNApiKey.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(updateTTNApiKey.fulfilled, (state, action) => {
+        state.loading = false;
+        // Update hasApiKey on the application
+        const app = state.applications.find((a) => a._id === action.payload.id);
+        if (app) app.hasApiKey = true;
+        if (state.selectedApplication && state.selectedApplication._id === action.payload.id) {
+          state.selectedApplication.hasApiKey = true;
+        }
+        state.success = 'API key updated successfully';
+      })
+      .addCase(updateTTNApiKey.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string;
       });
   },
 });
@@ -604,6 +727,7 @@ export const {
   setSelectedApplication,
   setSelectedDevice,
   addUplink,
+  addLogEntry,
   updateDownlinkStatus,
   updateDeviceOnlineStatus,
   updateGatewayFromUplink,
