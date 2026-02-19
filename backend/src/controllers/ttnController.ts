@@ -388,8 +388,9 @@ export const getDevice = async (req: Request, res: Response) => {
  */
 export const getUplinks = async (req: Request, res: Response) => {
   try {
-    const { applicationId, deviceId } = req.params;
-    const { limit = 50, offset = 0, startDate, endDate } = req.query;
+    const { applicationId, deviceId: routeDeviceId } = req.params;
+    const { limit = 50, offset = 0, startDate, endDate, gatewayId, deviceId: queryDeviceId } = req.query;
+    const deviceId = routeDeviceId || queryDeviceId;
 
     const query: Record<string, unknown> = {
       applicationId,
@@ -398,6 +399,10 @@ export const getUplinks = async (req: Request, res: Response) => {
 
     if (deviceId && deviceId !== 'all') {
       query.deviceId = deviceId;
+    }
+
+    if (gatewayId) {
+      query.gatewayId = gatewayId;
     }
 
     if (startDate || endDate) {
@@ -539,8 +544,9 @@ export const sendDownlink = async (req: Request, res: Response) => {
  */
 export const getDownlinks = async (req: Request, res: Response) => {
   try {
-    const { applicationId, deviceId } = req.params;
-    const { limit = 50, offset = 0, startDate, endDate } = req.query;
+    const { applicationId, deviceId: routeDeviceId } = req.params;
+    const { limit = 50, offset = 0, startDate, endDate, deviceId: queryDeviceId } = req.query;
+    const deviceId = routeDeviceId || queryDeviceId;
 
     const query: Record<string, unknown> = {
       applicationId,
@@ -832,6 +838,20 @@ export const getLogs = async (req: Request, res: Response) => {
 };
 
 /**
+ * Convert base64 payload to uppercase hex with spaces
+ */
+function base64ToHex(b64: string): string {
+  try {
+    const buf = Buffer.from(b64, 'base64');
+    return Array.from(buf)
+      .map((b) => b.toString(16).padStart(2, '0').toUpperCase())
+      .join(' ');
+  } catch {
+    return b64;
+  }
+}
+
+/**
  * Export logs as CSV or JSON
  */
 export const exportLogs = async (req: Request, res: Response) => {
@@ -907,7 +927,7 @@ export const exportLogs = async (req: Request, res: Response) => {
           csvEscape((u.receivedAt as Date)?.toISOString()),
           csvEscape(u.deviceId),
           csvEscape(u.fPort),
-          csvEscape(u.rawPayload),
+          csvEscape(u.rawPayload ? base64ToHex(u.rawPayload as string) : ''),
           csvEscape(u.rssi),
           csvEscape(u.snr),
           csvEscape(u.spreadingFactor),
@@ -923,7 +943,7 @@ export const exportLogs = async (req: Request, res: Response) => {
           csvEscape((d.createdAt as Date)?.toISOString()),
           csvEscape(d.deviceId),
           csvEscape(d.fPort),
-          csvEscape(d.payload),
+          csvEscape(d.payload ? base64ToHex(d.payload as string) : ''),
           '',
           '',
           '',
@@ -940,12 +960,18 @@ export const exportLogs = async (req: Request, res: Response) => {
       return res.send(csv);
     }
 
-    // JSON format
+    // JSON format — add payloadHex field
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="ttn-logs-${applicationId}-${Date.now()}.json"`);
     res.json({
-      uplinks: uplinkResults,
-      downlinks: downlinkResults,
+      uplinks: uplinkResults.map((u) => ({
+        ...u,
+        payloadHex: u.rawPayload ? base64ToHex(u.rawPayload as string) : '',
+      })),
+      downlinks: downlinkResults.map((d) => ({
+        ...d,
+        payloadHex: d.payload ? base64ToHex(d.payload as string) : '',
+      })),
       exportedAt: new Date().toISOString(),
       applicationId,
     });

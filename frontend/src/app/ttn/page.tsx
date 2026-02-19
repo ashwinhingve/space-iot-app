@@ -70,6 +70,9 @@ import {
   Trash2,
   AlertTriangle,
   Filter,
+  Copy,
+  Check,
+  Calendar,
 } from 'lucide-react';
 
 type TabType = 'overview' | 'devices' | 'gateways' | 'uplinks' | 'downlinks' | 'logs';
@@ -110,6 +113,12 @@ export default function TTNPage() {
     gatewayId: '',
     timeRange: '24h' as '1h' | '6h' | '24h',
   });
+  const [uplinkFilter, setUplinkFilter] = useState({ deviceId: 'all', gatewayId: '', startDate: '', endDate: '' });
+  const [downlinkFilter, setDownlinkFilter] = useState({ deviceId: 'all', startDate: '', endDate: '' });
+  const [copiedPayload, setCopiedPayload] = useState<string | null>(null);
+  const [logCustomStartDate, setLogCustomStartDate] = useState('');
+  const [logCustomEndDate, setLogCustomEndDate] = useState('');
+  const [logTimeMode, setLogTimeMode] = useState<'preset' | 'custom'>('preset');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
@@ -153,8 +162,6 @@ export default function TTNPage() {
   const refreshAppData = useCallback(() => {
     if (selectedApplication) {
       dispatch(fetchTTNDevices(selectedApplication.applicationId));
-      dispatch(fetchTTNUplinks({ applicationId: selectedApplication.applicationId }));
-      dispatch(fetchTTNDownlinks({ applicationId: selectedApplication.applicationId }));
       dispatch(fetchTTNStats({ applicationId: selectedApplication.applicationId, period: statsPeriod }));
       dispatch(fetchTTNGateways(selectedApplication.applicationId));
       dispatch(fetchTTNGatewayStats(selectedApplication.applicationId));
@@ -240,21 +247,54 @@ export default function TTNPage() {
     return () => clearInterval(interval);
   }, [selectedApplication, refreshAppData]);
 
+  // Fetch uplinks when tab is active or filters change
+  useEffect(() => {
+    if (activeTab === 'uplinks' && selectedApplication) {
+      dispatch(fetchTTNUplinks({
+        applicationId: selectedApplication.applicationId,
+        deviceId: uplinkFilter.deviceId !== 'all' ? uplinkFilter.deviceId : undefined,
+        gatewayId: uplinkFilter.gatewayId || undefined,
+        startDate: uplinkFilter.startDate || undefined,
+        endDate: uplinkFilter.endDate || undefined,
+      }));
+    }
+  }, [activeTab, selectedApplication, uplinkFilter, dispatch]);
+
+  // Fetch downlinks when tab is active or filters change
+  useEffect(() => {
+    if (activeTab === 'downlinks' && selectedApplication) {
+      dispatch(fetchTTNDownlinks({
+        applicationId: selectedApplication.applicationId,
+        deviceId: downlinkFilter.deviceId !== 'all' ? downlinkFilter.deviceId : undefined,
+        startDate: downlinkFilter.startDate || undefined,
+        endDate: downlinkFilter.endDate || undefined,
+      }));
+    }
+  }, [activeTab, selectedApplication, downlinkFilter, dispatch]);
+
   // Fetch logs when Live Logs tab is active or filters change
   useEffect(() => {
     if (activeTab === 'logs' && selectedApplication) {
-      const now = new Date();
-      const rangeMs = logFilter.timeRange === '1h' ? 3600000 : logFilter.timeRange === '6h' ? 21600000 : 86400000;
-      const startDate = new Date(now.getTime() - rangeMs).toISOString();
+      let startDate: string | undefined;
+      let endDate: string | undefined;
+      if (logTimeMode === 'custom') {
+        startDate = logCustomStartDate ? new Date(logCustomStartDate).toISOString() : undefined;
+        endDate = logCustomEndDate ? new Date(logCustomEndDate).toISOString() : undefined;
+      } else {
+        const now = new Date();
+        const rangeMs = logFilter.timeRange === '1h' ? 3600000 : logFilter.timeRange === '6h' ? 21600000 : 86400000;
+        startDate = new Date(now.getTime() - rangeMs).toISOString();
+      }
       dispatch(fetchTTNLogs({
         applicationId: selectedApplication.applicationId,
         startDate,
+        endDate,
         deviceId: logFilter.deviceId !== 'all' ? logFilter.deviceId : undefined,
         gatewayId: logFilter.gatewayId || undefined,
         eventType: logFilter.eventType !== 'all' ? logFilter.eventType : undefined,
       }));
     }
-  }, [activeTab, selectedApplication, logFilter, dispatch]);
+  }, [activeTab, selectedApplication, logFilter, logTimeMode, logCustomStartDate, logCustomEndDate, dispatch]);
 
   // Clear messages after 5 seconds
   useEffect(() => {
@@ -348,6 +388,38 @@ export default function TTNPage() {
     } catch {
       return payload;
     }
+  };
+
+  const formatPayloadText = (payload: string) => {
+    try {
+      const decoded = atob(payload);
+      return Array.from(decoded)
+        .map((char) => {
+          const code = char.charCodeAt(0);
+          return code >= 32 && code <= 126 ? char : '.';
+        })
+        .join('');
+    } catch {
+      return payload;
+    }
+  };
+
+  const handleCopyPayload = (payload: string) => {
+    const hex = formatPayload(payload);
+    const ascii = formatPayloadText(payload);
+    navigator.clipboard.writeText(`Hex: ${hex}\nASCII: ${ascii}`);
+    setCopiedPayload(payload);
+    setTimeout(() => setCopiedPayload(null), 2000);
+  };
+
+  const navigateToLogsForDevice = (deviceId: string) => {
+    setLogFilter({ ...logFilter, deviceId });
+    setActiveTab('logs');
+  };
+
+  const navigateToLogsForGateway = (gatewayId: string) => {
+    setLogFilter({ ...logFilter, gatewayId });
+    setActiveTab('logs');
   };
 
   const tabs: { key: TabType; label: string; icon: React.ReactNode }[] = [
@@ -739,7 +811,8 @@ export default function TTNPage() {
                         key={device._id}
                         initial={{ opacity: 0, scale: 0.95 }}
                         animate={{ opacity: 1, scale: 1 }}
-                        className="p-5 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50 hover:border-green-500/30 transition-all"
+                        className="p-5 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50 hover:border-green-500/30 transition-all cursor-pointer"
+                        onClick={() => navigateToLogsForDevice(device.deviceId)}
                       >
                         <div className="flex items-start justify-between mb-4">
                           <div>
@@ -800,7 +873,8 @@ export default function TTNPage() {
                             variant="outline"
                             size="sm"
                             className="flex-1"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               setSelectedDeviceForDownlink(device);
                               setShowDownlinkModal(true);
                             }}
@@ -810,6 +884,7 @@ export default function TTNPage() {
                             Downlink
                           </Button>
                         </div>
+                        <p className="text-xs text-muted-foreground mt-2 text-center">Click to view logs</p>
                       </motion.div>
                     ))}
                     {devices.length === 0 && (
@@ -875,7 +950,8 @@ export default function TTNPage() {
                           key={gw._id}
                           initial={{ opacity: 0, scale: 0.95 }}
                           animate={{ opacity: 1, scale: 1 }}
-                          className="p-5 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50 hover:border-emerald-500/30 transition-all"
+                          className="p-5 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50 hover:border-emerald-500/30 transition-all cursor-pointer"
+                          onClick={() => navigateToLogsForGateway(gw.gatewayId)}
                         >
                           <div className="flex items-start justify-between mb-4">
                             <div className="flex items-center gap-3">
@@ -945,6 +1021,7 @@ export default function TTNPage() {
                               </p>
                             </div>
                           </div>
+                          <p className="text-xs text-muted-foreground mt-3 text-center">Click to view logs</p>
                         </motion.div>
                       ))}
                       {gateways.length === 0 && (
@@ -965,8 +1042,62 @@ export default function TTNPage() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -20 }}
-                    className="rounded-xl bg-card/50 backdrop-blur-sm border border-border/50 overflow-hidden"
+                    className="space-y-4"
                   >
+                    {/* Filter Bar */}
+                    <div className="p-4 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                          <Filter className="h-4 w-4" />
+                          Filters
+                        </div>
+                        <select
+                          value={uplinkFilter.deviceId}
+                          onChange={(e) => setUplinkFilter({ ...uplinkFilter, deviceId: e.target.value })}
+                          className="px-3 py-1.5 rounded-lg text-xs bg-secondary/50 border border-border/50"
+                        >
+                          <option value="all">All Devices</option>
+                          {devices.map((d) => (
+                            <option key={d.deviceId} value={d.deviceId}>
+                              {d.name || d.deviceId}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="text"
+                          placeholder="Gateway ID..."
+                          value={uplinkFilter.gatewayId}
+                          onChange={(e) => setUplinkFilter({ ...uplinkFilter, gatewayId: e.target.value })}
+                          className="px-3 py-1.5 rounded-lg text-xs bg-secondary/50 border border-border/50 w-36"
+                        />
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                          <input
+                            type="datetime-local"
+                            value={uplinkFilter.startDate}
+                            onChange={(e) => setUplinkFilter({ ...uplinkFilter, startDate: e.target.value })}
+                            className="px-2 py-1.5 rounded-lg text-xs bg-secondary/50 border border-border/50"
+                          />
+                          <span className="text-xs text-muted-foreground">to</span>
+                          <input
+                            type="datetime-local"
+                            value={uplinkFilter.endDate}
+                            onChange={(e) => setUplinkFilter({ ...uplinkFilter, endDate: e.target.value })}
+                            className="px-2 py-1.5 rounded-lg text-xs bg-secondary/50 border border-border/50"
+                          />
+                        </div>
+                        {(uplinkFilter.deviceId !== 'all' || uplinkFilter.gatewayId || uplinkFilter.startDate || uplinkFilter.endDate) && (
+                          <button
+                            onClick={() => setUplinkFilter({ deviceId: 'all', gatewayId: '', startDate: '', endDate: '' })}
+                            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20 transition-all"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl bg-card/50 backdrop-blur-sm border border-border/50 overflow-hidden">
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead className="bg-secondary/50">
@@ -999,8 +1130,23 @@ export default function TTNPage() {
                                 </td>
                                 <td className="px-4 py-3 font-mono text-xs">{uplink.deviceId}</td>
                                 <td className="px-4 py-3">{uplink.fPort}</td>
-                                <td className="px-4 py-3 font-mono text-xs max-w-[120px] truncate">
-                                  {formatPayload(uplink.rawPayload)}
+                                <td className="px-4 py-3 font-mono text-xs max-w-[160px]">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="truncate" title={formatPayload(uplink.rawPayload)}>
+                                      {formatPayloadText(uplink.rawPayload)}
+                                    </span>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleCopyPayload(uplink.rawPayload); }}
+                                      className="shrink-0 p-0.5 rounded hover:bg-secondary/50 transition-colors"
+                                      title="Copy payload"
+                                    >
+                                      {copiedPayload === uplink.rawPayload ? (
+                                        <Check className="h-3 w-3 text-green-500" />
+                                      ) : (
+                                        <Copy className="h-3 w-3 text-muted-foreground" />
+                                      )}
+                                    </button>
+                                  </div>
                                 </td>
                                 <td className={`px-4 py-3 ${getRssiColor(uplink.rssi)}`}>
                                   {uplink.rssi} dBm
@@ -1071,6 +1217,7 @@ export default function TTNPage() {
                         </div>
                       )}
                     </div>
+                    </div>
                   </motion.div>
                 )}
 
@@ -1081,8 +1228,55 @@ export default function TTNPage() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -20 }}
-                    className="rounded-xl bg-card/50 backdrop-blur-sm border border-border/50 overflow-hidden"
+                    className="space-y-4"
                   >
+                    {/* Filter Bar */}
+                    <div className="p-4 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                          <Filter className="h-4 w-4" />
+                          Filters
+                        </div>
+                        <select
+                          value={downlinkFilter.deviceId}
+                          onChange={(e) => setDownlinkFilter({ ...downlinkFilter, deviceId: e.target.value })}
+                          className="px-3 py-1.5 rounded-lg text-xs bg-secondary/50 border border-border/50"
+                        >
+                          <option value="all">All Devices</option>
+                          {devices.map((d) => (
+                            <option key={d.deviceId} value={d.deviceId}>
+                              {d.name || d.deviceId}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                          <input
+                            type="datetime-local"
+                            value={downlinkFilter.startDate}
+                            onChange={(e) => setDownlinkFilter({ ...downlinkFilter, startDate: e.target.value })}
+                            className="px-2 py-1.5 rounded-lg text-xs bg-secondary/50 border border-border/50"
+                          />
+                          <span className="text-xs text-muted-foreground">to</span>
+                          <input
+                            type="datetime-local"
+                            value={downlinkFilter.endDate}
+                            onChange={(e) => setDownlinkFilter({ ...downlinkFilter, endDate: e.target.value })}
+                            className="px-2 py-1.5 rounded-lg text-xs bg-secondary/50 border border-border/50"
+                          />
+                        </div>
+                        {(downlinkFilter.deviceId !== 'all' || downlinkFilter.startDate || downlinkFilter.endDate) && (
+                          <button
+                            onClick={() => setDownlinkFilter({ deviceId: 'all', startDate: '', endDate: '' })}
+                            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20 transition-all"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl bg-card/50 backdrop-blur-sm border border-border/50 overflow-hidden">
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead className="bg-secondary/50">
@@ -1103,8 +1297,23 @@ export default function TTNPage() {
                               </td>
                               <td className="px-4 py-3 font-mono text-xs">{downlink.deviceId}</td>
                               <td className="px-4 py-3">{downlink.fPort}</td>
-                              <td className="px-4 py-3 font-mono text-xs max-w-xs truncate">
-                                {formatPayload(downlink.payload)}
+                              <td className="px-4 py-3 font-mono text-xs max-w-[160px]">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="truncate" title={formatPayload(downlink.payload)}>
+                                    {formatPayloadText(downlink.payload)}
+                                  </span>
+                                  <button
+                                    onClick={() => handleCopyPayload(downlink.payload)}
+                                    className="shrink-0 p-0.5 rounded hover:bg-secondary/50 transition-colors"
+                                    title="Copy payload"
+                                  >
+                                    {copiedPayload === downlink.payload ? (
+                                      <Check className="h-3 w-3 text-green-500" />
+                                    ) : (
+                                      <Copy className="h-3 w-3 text-muted-foreground" />
+                                    )}
+                                  </button>
+                                </div>
                               </td>
                               <td className="px-4 py-3">
                                 <span
@@ -1139,6 +1348,7 @@ export default function TTNPage() {
                         </div>
                       )}
                     </div>
+                    </div>
                   </motion.div>
                 )}
 
@@ -1164,9 +1374,12 @@ export default function TTNPage() {
                           {(['1h', '6h', '24h'] as const).map((range) => (
                             <button
                               key={range}
-                              onClick={() => setLogFilter({ ...logFilter, timeRange: range })}
+                              onClick={() => {
+                                setLogTimeMode('preset');
+                                setLogFilter({ ...logFilter, timeRange: range });
+                              }}
                               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                                logFilter.timeRange === range
+                                logTimeMode === 'preset' && logFilter.timeRange === range
                                   ? 'bg-green-500/20 text-green-500 border border-green-500/30'
                                   : 'bg-secondary/50 hover:bg-secondary/80 text-muted-foreground'
                               }`}
@@ -1174,7 +1387,37 @@ export default function TTNPage() {
                               {range}
                             </button>
                           ))}
+                          <button
+                            onClick={() => setLogTimeMode('custom')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1 ${
+                              logTimeMode === 'custom'
+                                ? 'bg-green-500/20 text-green-500 border border-green-500/30'
+                                : 'bg-secondary/50 hover:bg-secondary/80 text-muted-foreground'
+                            }`}
+                          >
+                            <Calendar className="h-3 w-3" />
+                            Custom
+                          </button>
                         </div>
+
+                        {/* Custom date range */}
+                        {logTimeMode === 'custom' && (
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="datetime-local"
+                              value={logCustomStartDate}
+                              onChange={(e) => setLogCustomStartDate(e.target.value)}
+                              className="px-2 py-1.5 rounded-lg text-xs bg-secondary/50 border border-border/50"
+                            />
+                            <span className="text-xs text-muted-foreground">to</span>
+                            <input
+                              type="datetime-local"
+                              value={logCustomEndDate}
+                              onChange={(e) => setLogCustomEndDate(e.target.value)}
+                              className="px-2 py-1.5 rounded-lg text-xs bg-secondary/50 border border-border/50"
+                            />
+                          </div>
+                        )}
 
                         {/* Event Type */}
                         <select
@@ -1217,10 +1460,15 @@ export default function TTNPage() {
                               key={fmt}
                               onClick={async () => {
                                 if (!selectedApplication) return;
-                                const now = new Date();
-                                const rangeMs = logFilter.timeRange === '1h' ? 3600000 : logFilter.timeRange === '6h' ? 21600000 : 86400000;
                                 const params = new URLSearchParams();
-                                params.set('startDate', new Date(now.getTime() - rangeMs).toISOString());
+                                if (logTimeMode === 'custom') {
+                                  if (logCustomStartDate) params.set('startDate', new Date(logCustomStartDate).toISOString());
+                                  if (logCustomEndDate) params.set('endDate', new Date(logCustomEndDate).toISOString());
+                                } else {
+                                  const now = new Date();
+                                  const rangeMs = logFilter.timeRange === '1h' ? 3600000 : logFilter.timeRange === '6h' ? 21600000 : 86400000;
+                                  params.set('startDate', new Date(now.getTime() - rangeMs).toISOString());
+                                }
                                 params.set('format', fmt);
                                 if (logFilter.deviceId !== 'all') params.set('deviceId', logFilter.deviceId);
                                 if (logFilter.gatewayId) params.set('gatewayId', logFilter.gatewayId);
@@ -1282,12 +1530,39 @@ export default function TTNPage() {
                                 <td className="px-4 py-3 whitespace-nowrap text-xs">
                                   {formatDate(entry._timestamp)}
                                 </td>
-                                <td className="px-4 py-3 font-mono text-xs">{entry.deviceId}</td>
+                                <td className="px-4 py-3 font-mono text-xs">
+                                  <button
+                                    onClick={() => setLogFilter({ ...logFilter, deviceId: entry.deviceId })}
+                                    className="hover:text-green-500 hover:underline transition-colors"
+                                    title="Filter by this device"
+                                  >
+                                    {entry.deviceId}
+                                  </button>
+                                </td>
                                 <td className="px-4 py-3">{entry.fPort ?? '-'}</td>
-                                <td className="px-4 py-3 font-mono text-xs max-w-[120px] truncate">
-                                  {entry._type === 'uplink'
-                                    ? formatPayload(entry.rawPayload || '')
-                                    : formatPayload(entry.payload || '')}
+                                <td className="px-4 py-3 font-mono text-xs max-w-[160px]">
+                                  {(() => {
+                                    const payload = entry._type === 'uplink' ? entry.rawPayload || '' : entry.payload || '';
+                                    if (!payload) return '-';
+                                    return (
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="truncate" title={formatPayload(payload)}>
+                                          {formatPayloadText(payload)}
+                                        </span>
+                                        <button
+                                          onClick={() => handleCopyPayload(payload)}
+                                          className="shrink-0 p-0.5 rounded hover:bg-secondary/50 transition-colors"
+                                          title="Copy payload"
+                                        >
+                                          {copiedPayload === payload ? (
+                                            <Check className="h-3 w-3 text-green-500" />
+                                          ) : (
+                                            <Copy className="h-3 w-3 text-muted-foreground" />
+                                          )}
+                                        </button>
+                                      </div>
+                                    );
+                                  })()}
                                 </td>
                                 <td className="px-4 py-3">
                                   {entry._type === 'uplink' ? (
@@ -1310,8 +1585,16 @@ export default function TTNPage() {
                                     </span>
                                   )}
                                 </td>
-                                <td className="px-4 py-3 font-mono text-xs truncate max-w-[140px]">
-                                  {entry.gatewayId || '-'}
+                                <td className="px-4 py-3 font-mono text-xs max-w-[140px]">
+                                  {entry.gatewayId ? (
+                                    <button
+                                      onClick={() => setLogFilter({ ...logFilter, gatewayId: entry.gatewayId || '' })}
+                                      className="hover:text-green-500 hover:underline transition-colors truncate block"
+                                      title="Filter by this gateway"
+                                    >
+                                      {entry.gatewayId}
+                                    </button>
+                                  ) : '-'}
                                 </td>
                               </tr>
                             ))}

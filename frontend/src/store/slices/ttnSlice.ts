@@ -342,13 +342,31 @@ export const fetchTTNDevices = createAsyncThunk(
 export const fetchTTNUplinks = createAsyncThunk(
   'ttn/fetchUplinks',
   async (
-    { applicationId, deviceId, limit = 50 }: { applicationId: string; deviceId?: string; limit?: number },
+    {
+      applicationId,
+      deviceId,
+      gatewayId,
+      startDate,
+      endDate,
+      limit = 50,
+    }: {
+      applicationId: string;
+      deviceId?: string;
+      gatewayId?: string;
+      startDate?: string;
+      endDate?: string;
+      limit?: number;
+    },
     { rejectWithValue }
   ) => {
     try {
-      const url = deviceId
-        ? `${API_ENDPOINTS.TTN_DEVICE_UPLINKS(applicationId, deviceId)}?limit=${limit}`
-        : `${API_ENDPOINTS.TTN_UPLINKS(applicationId)}?limit=${limit}`;
+      const params = new URLSearchParams();
+      params.set('limit', String(limit));
+      if (deviceId && deviceId !== 'all') params.set('deviceId', deviceId);
+      if (gatewayId) params.set('gatewayId', gatewayId);
+      if (startDate) params.set('startDate', startDate);
+      if (endDate) params.set('endDate', endDate);
+      const url = `${API_ENDPOINTS.TTN_UPLINKS(applicationId)}?${params.toString()}`;
       const response = await fetch(url, { headers: getAuthHeaders() });
       if (!response.ok) throw new Error('Failed to fetch uplinks');
       const data = await response.json();
@@ -362,13 +380,28 @@ export const fetchTTNUplinks = createAsyncThunk(
 export const fetchTTNDownlinks = createAsyncThunk(
   'ttn/fetchDownlinks',
   async (
-    { applicationId, deviceId, limit = 50 }: { applicationId: string; deviceId?: string; limit?: number },
+    {
+      applicationId,
+      deviceId,
+      startDate,
+      endDate,
+      limit = 50,
+    }: {
+      applicationId: string;
+      deviceId?: string;
+      startDate?: string;
+      endDate?: string;
+      limit?: number;
+    },
     { rejectWithValue }
   ) => {
     try {
-      const url = deviceId
-        ? `${API_ENDPOINTS.TTN_DEVICE_DOWNLINKS(applicationId, deviceId)}?limit=${limit}`
-        : `${API_ENDPOINTS.TTN_DOWNLINKS(applicationId)}?limit=${limit}`;
+      const params = new URLSearchParams();
+      params.set('limit', String(limit));
+      if (deviceId && deviceId !== 'all') params.set('deviceId', deviceId);
+      if (startDate) params.set('startDate', startDate);
+      if (endDate) params.set('endDate', endDate);
+      const url = `${API_ENDPOINTS.TTN_DOWNLINKS(applicationId)}?${params.toString()}`;
       const response = await fetch(url, { headers: getAuthHeaders() });
       if (!response.ok) throw new Error('Failed to fetch downlinks');
       const data = await response.json();
