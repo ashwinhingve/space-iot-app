@@ -636,48 +636,124 @@ export const getStats = async (req: Request, res: Response) => {
       TTNGateway.countDocuments({ ...baseQuery, isOnline: true }),
     ]);
 
-    // Get uplink time series for chart
-    const uplinkTimeSeries = await TTNUplink.aggregate([
-      {
-        $match: {
-          applicationId,
-          receivedAt: { $gte: startDate },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            $dateToString: {
-              format: period === '1h' ? '%Y-%m-%d %H:%M' : '%Y-%m-%d %H:00',
-              date: '$receivedAt',
-            },
-          },
-          count: { $sum: 1 },
-          avgRssi: { $avg: '$rssi' },
-          avgSnr: { $avg: '$snr' },
-        },
-      },
-      { $sort: { _id: 1 } },
-    ]);
+    // Time series format based on period
+    const timeFormat = period === '1h' ? '%Y-%m-%d %H:%M' : '%Y-%m-%d %H:00';
 
-    // Get top devices by uplink count
-    const topDevices = await TTNUplink.aggregate([
-      {
-        $match: {
-          applicationId,
-          receivedAt: { $gte: startDate },
+    // Run all aggregation pipelines in parallel
+    const [
+      uplinkTimeSeries,
+      topDevices,
+      downlinkTimeSeries,
+      sfDistribution,
+      downlinkStatusBreakdown,
+      gatewayTraffic,
+      hourlyHeatmap,
+      frequencyDistribution,
+    ] = await Promise.all([
+      // Uplink time series
+      TTNUplink.aggregate([
+        { $match: { applicationId, receivedAt: { $gte: startDate } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: timeFormat, date: '$receivedAt' } },
+            count: { $sum: 1 },
+            avgRssi: { $avg: '$rssi' },
+            avgSnr: { $avg: '$snr' },
+          },
         },
-      },
-      {
-        $group: {
-          _id: '$deviceId',
-          uplinkCount: { $sum: 1 },
-          lastSeen: { $max: '$receivedAt' },
-          avgRssi: { $avg: '$rssi' },
+        { $sort: { _id: 1 } },
+      ]),
+
+      // Top devices by uplink count
+      TTNUplink.aggregate([
+        { $match: { applicationId, receivedAt: { $gte: startDate } } },
+        {
+          $group: {
+            _id: '$deviceId',
+            uplinkCount: { $sum: 1 },
+            lastSeen: { $max: '$receivedAt' },
+            avgRssi: { $avg: '$rssi' },
+            avgSnr: { $avg: '$snr' },
+          },
         },
-      },
-      { $sort: { uplinkCount: -1 } },
-      { $limit: 10 },
+        { $sort: { uplinkCount: -1 } },
+        { $limit: 10 },
+      ]),
+
+      // Downlink time series
+      TTNDownlink.aggregate([
+        { $match: { applicationId, owner: req.user._id, createdAt: { $gte: startDate } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: timeFormat, date: '$createdAt' } },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+
+      // Spreading Factor distribution
+      TTNUplink.aggregate([
+        { $match: { applicationId, receivedAt: { $gte: startDate }, spreadingFactor: { $exists: true } } },
+        {
+          $group: {
+            _id: '$spreadingFactor',
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+
+      // Downlink status breakdown
+      TTNDownlink.aggregate([
+        { $match: { applicationId, owner: req.user._id, createdAt: { $gte: startDate } } },
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { count: -1 } },
+      ]),
+
+      // Per-gateway traffic (top 10)
+      TTNUplink.aggregate([
+        { $match: { applicationId, receivedAt: { $gte: startDate }, gatewayId: { $exists: true, $ne: null } } },
+        {
+          $group: {
+            _id: '$gatewayId',
+            count: { $sum: 1 },
+            avgRssi: { $avg: '$rssi' },
+            avgSnr: { $avg: '$snr' },
+          },
+        },
+        { $sort: { count: -1 } },
+        { $limit: 10 },
+      ]),
+
+      // Hourly message heatmap (0-23)
+      TTNUplink.aggregate([
+        { $match: { applicationId, receivedAt: { $gte: startDate } } },
+        {
+          $group: {
+            _id: { $hour: '$receivedAt' },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+
+      // Frequency distribution
+      TTNUplink.aggregate([
+        { $match: { applicationId, receivedAt: { $gte: startDate }, frequency: { $exists: true, $gt: 0 } } },
+        {
+          $group: {
+            _id: '$frequency',
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { count: -1 } },
+      ]),
     ]);
 
     res.json({
@@ -694,6 +770,12 @@ export const getStats = async (req: Request, res: Response) => {
       },
       uplinkTimeSeries,
       topDevices,
+      downlinkTimeSeries,
+      sfDistribution,
+      downlinkStatusBreakdown,
+      gatewayTraffic,
+      hourlyHeatmap,
+      frequencyDistribution,
       period,
     });
   } catch (error) {
@@ -852,6 +934,18 @@ function base64ToHex(b64: string): string {
 }
 
 /**
+ * Convert base64 payload to printable ASCII (non-printable chars replaced with '.')
+ */
+function base64ToAscii(b64: string): string {
+  try {
+    const buf = Buffer.from(b64, 'base64');
+    return Array.from(buf).map(b => b >= 32 && b <= 126 ? String.fromCharCode(b) : '.').join('');
+  } catch {
+    return b64;
+  }
+}
+
+/**
  * Export logs as CSV or JSON
  */
 export const exportLogs = async (req: Request, res: Response) => {
@@ -871,6 +965,20 @@ export const exportLogs = async (req: Request, res: Response) => {
     const now = new Date();
     const start = startDate ? new Date(startDate as string) : new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const end = endDate ? new Date(endDate as string) : now;
+
+    // Date range validation
+    const RETENTION_MS = 31 * 24 * 60 * 60 * 1000;
+    const RANGE_MS = end.getTime() - start.getTime();
+    if (RANGE_MS > RETENTION_MS) {
+      return res.status(400).json({ error: 'Date range cannot exceed 31 days' });
+    }
+    if (RANGE_MS < 0) {
+      return res.status(400).json({ error: 'Start date must be before end date' });
+    }
+    const retentionCutoff = new Date(now.getTime() - RETENTION_MS);
+    if (start < retentionCutoff) {
+      return res.status(400).json({ error: 'Logs are only retained for the last 31 days' });
+    }
 
     const baseQuery: Record<string, unknown> = {
       applicationId,
@@ -909,6 +1017,59 @@ export const exportLogs = async (req: Request, res: Response) => {
         .lean();
     }
 
+    // TXT format — human-readable plain text
+    if (format === 'txt') {
+      // Build sorted entries with timestamps for chronological output
+      type TxtEntry = { _type: 'uplink' | 'downlink'; _timestamp: Date; data: Record<string, unknown> };
+      const merged: TxtEntry[] = [
+        ...uplinkResults.map((u) => ({
+          _type: 'uplink' as const,
+          _timestamp: new Date(u.receivedAt as string),
+          data: u,
+        })),
+        ...downlinkResults.map((d) => ({
+          _type: 'downlink' as const,
+          _timestamp: new Date(d.createdAt as string),
+          data: d,
+        })),
+      ].sort((a, b) => a._timestamp.getTime() - b._timestamp.getTime());
+
+      const lines: string[] = [];
+      lines.push('=== TTN Logs Export ===');
+      lines.push(`Application: ${applicationId}`);
+      lines.push(`Period: ${start.toISOString()} to ${end.toISOString()}`);
+      lines.push(`Exported: ${now.toISOString()}`);
+      lines.push(`Filters: Device=${deviceId || 'all'}, Gateway=${gatewayId || 'all'}, Type=${eventType}`);
+      lines.push(`Total: ${merged.length} events`);
+      lines.push('========================================');
+      lines.push('');
+
+      for (const entry of merged) {
+        const ts = entry._timestamp.toISOString();
+        const d = entry.data;
+        if (entry._type === 'uplink') {
+          const hex = d.rawPayload ? base64ToHex(d.rawPayload as string) : '';
+          const ascii = d.rawPayload ? base64ToAscii(d.rawPayload as string) : '';
+          const freq = d.frequency ? `${(Number(d.frequency) / 1000000).toFixed(1)}` : '?';
+          lines.push(`[${ts}] UPLINK | Device: ${d.deviceId} | Port: ${d.fPort ?? '-'} | Gateway: ${d.gatewayId || '-'}`);
+          lines.push(`  RSSI: ${d.rssi ?? '?'} dBm | SNR: ${d.snr ?? '?'} dB | SF${d.spreadingFactor ?? '?'} | ${freq} MHz`);
+          if (hex) lines.push(`  Payload (hex): ${hex}`);
+          if (ascii) lines.push(`  Payload (ascii): ${ascii}`);
+        } else {
+          const hex = d.payload ? base64ToHex(d.payload as string) : '';
+          const ascii = d.payload ? base64ToAscii(d.payload as string) : '';
+          lines.push(`[${ts}] DOWNLINK | Device: ${d.deviceId} | Port: ${d.fPort ?? '-'} | Status: ${d.status || '-'}`);
+          if (hex) lines.push(`  Payload (hex): ${hex}`);
+          if (ascii) lines.push(`  Payload (ascii): ${ascii}`);
+        }
+        lines.push('');
+      }
+
+      res.setHeader('Content-Type', 'text/plain');
+      res.setHeader('Content-Disposition', `attachment; filename="ttn-logs-${applicationId}-${Date.now()}.txt"`);
+      return res.send(lines.join('\n'));
+    }
+
     if (format === 'csv') {
       const csvEscape = (val: unknown): string => {
         const str = val == null ? '' : String(val);
@@ -927,7 +1088,7 @@ export const exportLogs = async (req: Request, res: Response) => {
           csvEscape((u.receivedAt as Date)?.toISOString()),
           csvEscape(u.deviceId),
           csvEscape(u.fPort),
-          csvEscape(u.rawPayload ? base64ToHex(u.rawPayload as string) : ''),
+          csvEscape(u.rawPayload ? base64ToAscii(u.rawPayload as string) : ''),
           csvEscape(u.rssi),
           csvEscape(u.snr),
           csvEscape(u.spreadingFactor),
@@ -943,7 +1104,7 @@ export const exportLogs = async (req: Request, res: Response) => {
           csvEscape((d.createdAt as Date)?.toISOString()),
           csvEscape(d.deviceId),
           csvEscape(d.fPort),
-          csvEscape(d.payload ? base64ToHex(d.payload as string) : ''),
+          csvEscape(d.payload ? base64ToAscii(d.payload as string) : ''),
           '',
           '',
           '',
@@ -960,17 +1121,17 @@ export const exportLogs = async (req: Request, res: Response) => {
       return res.send(csv);
     }
 
-    // JSON format — add payloadHex field
+    // JSON format — add payloadText field (ASCII readable)
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="ttn-logs-${applicationId}-${Date.now()}.json"`);
     res.json({
       uplinks: uplinkResults.map((u) => ({
         ...u,
-        payloadHex: u.rawPayload ? base64ToHex(u.rawPayload as string) : '',
+        payloadText: u.rawPayload ? base64ToAscii(u.rawPayload as string) : '',
       })),
       downlinks: downlinkResults.map((d) => ({
         ...d,
-        payloadHex: d.payload ? base64ToHex(d.payload as string) : '',
+        payloadText: d.payload ? base64ToAscii(d.payload as string) : '',
       })),
       exportedAt: new Date().toISOString(),
       applicationId,

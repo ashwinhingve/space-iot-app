@@ -195,7 +195,14 @@ export interface TTNStats {
     uplinkCount: number;
     lastSeen: string;
     avgRssi: number;
+    avgSnr: number;
   }>;
+  downlinkTimeSeries: Array<{ _id: string; count: number }>;
+  sfDistribution: Array<{ _id: number; count: number }>;
+  downlinkStatusBreakdown: Array<{ _id: string; count: number }>;
+  gatewayTraffic: Array<{ _id: string; count: number; avgRssi: number; avgSnr: number }>;
+  hourlyHeatmap: Array<{ _id: number; count: number }>;
+  frequencyDistribution: Array<{ _id: number; count: number }>;
   period: string;
 }
 

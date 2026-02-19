@@ -95,6 +95,7 @@ const ttnDownlinkSchema = new mongoose.Schema({
 
 // Compound indexes
 ttnDownlinkSchema.index({ deviceId: 1, createdAt: -1 });
+ttnDownlinkSchema.index({ applicationId: 1, createdAt: -1 });
 ttnDownlinkSchema.index({ correlationId: 1 });
 
 // TTL index: auto-delete after 30 days

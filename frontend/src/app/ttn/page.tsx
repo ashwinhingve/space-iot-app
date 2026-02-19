@@ -38,6 +38,12 @@ import {
   Area,
   LineChart,
   Line,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  Legend,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -67,6 +73,7 @@ import {
   KeyRound,
   ShieldCheck,
   Download,
+  FileText,
   Trash2,
   AlertTriangle,
   Filter,
@@ -121,6 +128,8 @@ export default function TTNPage() {
   const [logTimeMode, setLogTimeMode] = useState<'preset' | 'custom'>('preset');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [downloadError, setDownloadError] = useState('');
+  const [downloading, setDownloading] = useState(false);
 
   // Form states
   const [newApp, setNewApp] = useState({
@@ -318,6 +327,92 @@ export default function TTNPage() {
     }));
   }, [stats]);
 
+  const downlinkChartData = useMemo(() => {
+    if (!stats?.downlinkTimeSeries) return [];
+    return stats.downlinkTimeSeries.map((item) => ({
+      time: item._id.includes(' ') ? item._id.split(' ')[1] : item._id.split('T')[0],
+      downlinks: item.count,
+    }));
+  }, [stats]);
+
+  const SF_COLORS: Record<number, string> = { 7: '#10b981', 8: '#06b6d4', 9: '#3b82f6', 10: '#8b5cf6', 11: '#f59e0b', 12: '#ef4444' };
+
+  const sfChartData = useMemo(() => {
+    if (!stats?.sfDistribution) return [];
+    return stats.sfDistribution.map((item) => ({
+      sf: `SF${item._id}`,
+      count: item.count,
+      fill: SF_COLORS[item._id] || '#6b7280',
+    }));
+  }, [stats]);
+
+  const STATUS_COLORS: Record<string, string> = {
+    PENDING: '#f59e0b',
+    SCHEDULED: '#3b82f6',
+    SENT: '#10b981',
+    ACKNOWLEDGED: '#06b6d4',
+    FAILED: '#ef4444',
+  };
+
+  const statusChartData = useMemo(() => {
+    if (!stats?.downlinkStatusBreakdown) return [];
+    return stats.downlinkStatusBreakdown.map((item) => ({
+      name: item._id,
+      value: item.count,
+      fill: STATUS_COLORS[item._id] || '#6b7280',
+    }));
+  }, [stats]);
+
+  const gatewayChartData = useMemo(() => {
+    if (!stats?.gatewayTraffic) return [];
+    return stats.gatewayTraffic.map((item) => ({
+      gateway: item._id.length > 20 ? item._id.slice(0, 18) + '…' : item._id,
+      fullId: item._id,
+      count: item.count,
+      avgRssi: Math.round(item.avgRssi * 10) / 10,
+      avgSnr: Math.round(item.avgSnr * 10) / 10,
+    }));
+  }, [stats]);
+
+  const hourlyData = useMemo(() => {
+    if (!stats?.hourlyHeatmap) return [];
+    // Fill all 24 hours
+    const map = new Map(stats.hourlyHeatmap.map((h) => [h._id, h.count]));
+    return Array.from({ length: 24 }, (_, i) => ({
+      hour: `${i.toString().padStart(2, '0')}:00`,
+      count: map.get(i) || 0,
+    }));
+  }, [stats]);
+
+  const frequencyData = useMemo(() => {
+    if (!stats?.frequencyDistribution) return [];
+    return stats.frequencyDistribution.map((item) => ({
+      freq: `${(item._id / 1000000).toFixed(1)}`,
+      count: item.count,
+    }));
+  }, [stats]);
+
+  const downlinkSuccessRate = useMemo(() => {
+    if (!stats?.downlinkStatusBreakdown || stats.downlinkStatusBreakdown.length === 0) return null;
+    const total = stats.downlinkStatusBreakdown.reduce((s, d) => s + d.count, 0);
+    const success = stats.downlinkStatusBreakdown
+      .filter((d) => d._id === 'SENT' || d._id === 'ACKNOWLEDGED')
+      .reduce((s, d) => s + d.count, 0);
+    return total > 0 ? Math.round((success / total) * 100) : 0;
+  }, [stats]);
+
+  const avgRssi = useMemo(() => {
+    if (!stats?.uplinkTimeSeries || stats.uplinkTimeSeries.length === 0) return null;
+    const sum = stats.uplinkTimeSeries.reduce((s, d) => s + d.avgRssi, 0);
+    return Math.round((sum / stats.uplinkTimeSeries.length) * 10) / 10;
+  }, [stats]);
+
+  const avgSnr = useMemo(() => {
+    if (!stats?.uplinkTimeSeries || stats.uplinkTimeSeries.length === 0) return null;
+    const sum = stats.uplinkTimeSeries.reduce((s, d) => s + d.avgSnr, 0);
+    return Math.round((sum / stats.uplinkTimeSeries.length) * 10) / 10;
+  }, [stats]);
+
   const handleCreateApp = async (e: React.FormEvent) => {
     e.preventDefault();
     const result = await dispatch(createTTNApplication(newApp));
@@ -410,6 +505,91 @@ export default function TTNPage() {
     navigator.clipboard.writeText(`Hex: ${hex}\nASCII: ${ascii}`);
     setCopiedPayload(payload);
     setTimeout(() => setCopiedPayload(null), 2000);
+  };
+
+  // Download validation and handler
+  const MAX_RANGE_MS = 31 * 24 * 60 * 60 * 1000;
+  const validateDownloadRange = (startStr: string, endStr: string): string | null => {
+    if (!startStr) return null; // will use default 24h
+    const s = new Date(startStr).getTime();
+    const e = endStr ? new Date(endStr).getTime() : Date.now();
+    if (s > e) return 'Start date must be before end date';
+    if (e - s > MAX_RANGE_MS) return 'Date range cannot exceed 31 days';
+    const cutoff = Date.now() - MAX_RANGE_MS;
+    if (s < cutoff) return 'Logs are only available for the last 31 days';
+    return null;
+  };
+
+  const handleDownload = async (fmt: 'txt' | 'csv' | 'json', options?: {
+    forceLastDay?: boolean;
+    eventType?: string;
+    deviceId?: string;
+    gatewayId?: string;
+    startDate?: string;
+    endDate?: string;
+  }) => {
+    if (!selectedApplication) return;
+    setDownloadError('');
+
+    const params = new URLSearchParams();
+
+    if (options?.forceLastDay) {
+      // Quick download: always last 24h
+      params.set('startDate', new Date(Date.now() - 86400000).toISOString());
+    } else if (options?.startDate || options?.endDate) {
+      // Explicit dates from tab-specific filters (Uplinks/Downlinks tabs)
+      if (options.startDate) params.set('startDate', options.startDate);
+      if (options.endDate) params.set('endDate', options.endDate);
+    } else if (logTimeMode === 'custom') {
+      const err = validateDownloadRange(logCustomStartDate, logCustomEndDate);
+      if (err) {
+        setDownloadError(err);
+        setTimeout(() => setDownloadError(''), 5000);
+        return;
+      }
+      if (logCustomStartDate) params.set('startDate', new Date(logCustomStartDate).toISOString());
+      if (logCustomEndDate) params.set('endDate', new Date(logCustomEndDate).toISOString());
+    } else {
+      const rangeMs = logFilter.timeRange === '1h' ? 3600000 : logFilter.timeRange === '6h' ? 21600000 : 86400000;
+      params.set('startDate', new Date(Date.now() - rangeMs).toISOString());
+    }
+
+    // Use provided overrides or fall back to log filter values
+    const evType = options?.eventType ?? logFilter.eventType;
+    const devId = options?.deviceId ?? logFilter.deviceId;
+    const gwId = options?.gatewayId ?? logFilter.gatewayId;
+
+    params.set('format', fmt);
+    if (devId && devId !== 'all') params.set('deviceId', devId);
+    if (gwId) params.set('gatewayId', gwId);
+    if (evType && evType !== 'all') params.set('eventType', evType);
+
+    setDownloading(true);
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      const resp = await fetch(
+        `${API_ENDPOINTS.TTN_LOGS_EXPORT(selectedApplication.applicationId)}?${params.toString()}`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => null);
+        setDownloadError(data?.error || 'Download failed');
+        setTimeout(() => setDownloadError(''), 5000);
+        return;
+      }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ttn-logs-${selectedApplication.applicationId}.${fmt}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setDownloadError('Download failed');
+      setTimeout(() => setDownloadError(''), 5000);
+    } finally {
+      setDownloading(false);
+    }
   };
 
   const navigateToLogsForDevice = (deviceId: string) => {
@@ -609,7 +789,7 @@ export default function TTNPage() {
                     exit={{ opacity: 0, y: -20 }}
                     className="space-y-6"
                   >
-                    {/* Period Selector */}
+                    {/* Row 0: Period Selector */}
                     <div className="flex justify-end gap-2">
                       {['1h', '24h', '7d', '30d'].map((p) => (
                         <button
@@ -626,47 +806,154 @@ export default function TTNPage() {
                       ))}
                     </div>
 
-                    {/* Stats Cards */}
+                    {/* Row 1: Summary Stat Cards — 8 cards in 4-col grid */}
                     {stats && (
-                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                        {[
-                          { label: 'Total Devices', value: stats.summary.totalDevices, icon: Radio, color: 'blue' },
-                          { label: 'Online Devices', value: stats.summary.onlineDevices, icon: Wifi, color: 'green' },
-                          { label: 'Total Gateways', value: stats.summary.totalGateways ?? 0, icon: Server, color: 'indigo' },
-                          { label: 'Online Gateways', value: stats.summary.onlineGateways ?? 0, icon: Signal, color: 'emerald' },
-                          { label: `Uplinks (${statsPeriod})`, value: stats.summary.recentUplinks, icon: ArrowUpCircle, color: 'purple' },
-                          { label: 'Downlinks', value: stats.summary.totalDownlinks, icon: ArrowDownCircle, color: 'orange' },
-                        ].map((stat, i) => (
-                          <motion.div
-                            key={stat.label}
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.05 * i }}
-                            className="p-4 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50"
-                          >
-                            <div className="flex items-center gap-3">
-                              <div className={`p-2 rounded-lg bg-${stat.color}-500/10`}>
-                                <stat.icon className={`h-5 w-5 text-${stat.color}-500`} />
-                              </div>
-                              <div>
-                                <p className="text-2xl font-bold">{stat.value}</p>
-                                <p className="text-xs text-muted-foreground">{stat.label}</p>
-                              </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {/* Total Devices */}
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0 }}
+                          className="p-4 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                          <div className="flex items-center gap-3 mb-2">
+                            <div className="p-2 rounded-lg bg-blue-500/10"><Radio className="h-5 w-5 text-blue-500" /></div>
+                            <div>
+                              <p className="text-2xl font-bold">{stats.summary.totalDevices}</p>
+                              <p className="text-xs text-muted-foreground">Total Devices</p>
                             </div>
-                          </motion.div>
-                        ))}
+                          </div>
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="text-green-500">{stats.summary.onlineDevices} online</span>
+                            <span className="text-muted-foreground">/</span>
+                            <span className="text-slate-500">{stats.summary.offlineDevices} offline</span>
+                          </div>
+                          {stats.summary.totalDevices > 0 && (
+                            <div className="mt-2 h-1.5 rounded-full bg-secondary/50 overflow-hidden">
+                              <div className="h-full bg-green-500 rounded-full" style={{ width: `${(stats.summary.onlineDevices / stats.summary.totalDevices) * 100}%` }} />
+                            </div>
+                          )}
+                        </motion.div>
+
+                        {/* Total Gateways */}
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
+                          className="p-4 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                          <div className="flex items-center gap-3 mb-2">
+                            <div className="p-2 rounded-lg bg-cyan-500/10"><Server className="h-5 w-5 text-cyan-500" /></div>
+                            <div>
+                              <p className="text-2xl font-bold">{stats.summary.totalGateways}</p>
+                              <p className="text-xs text-muted-foreground">Total Gateways</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="text-green-500">{stats.summary.onlineGateways} online</span>
+                            <span className="text-muted-foreground">/</span>
+                            <span className="text-slate-500">{(stats.summary.totalGateways ?? 0) - (stats.summary.onlineGateways ?? 0)} offline</span>
+                          </div>
+                          {(stats.summary.totalGateways ?? 0) > 0 && (
+                            <div className="mt-2 h-1.5 rounded-full bg-secondary/50 overflow-hidden">
+                              <div className="h-full bg-cyan-500 rounded-full" style={{ width: `${((stats.summary.onlineGateways ?? 0) / (stats.summary.totalGateways ?? 1)) * 100}%` }} />
+                            </div>
+                          )}
+                        </motion.div>
+
+                        {/* Uplinks in Period */}
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+                          className="p-4 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 rounded-lg bg-green-500/10"><ArrowUpCircle className="h-5 w-5 text-green-500" /></div>
+                            <div>
+                              <p className="text-2xl font-bold">{stats.summary.recentUplinks}</p>
+                              <p className="text-xs text-muted-foreground">Uplinks ({statsPeriod})</p>
+                            </div>
+                          </div>
+                        </motion.div>
+
+                        {/* Downlinks in Period */}
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
+                          className="p-4 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 rounded-lg bg-blue-500/10"><ArrowDownCircle className="h-5 w-5 text-blue-500" /></div>
+                            <div>
+                              <p className="text-2xl font-bold">{stats.summary.totalDownlinks}</p>
+                              <p className="text-xs text-muted-foreground">Total Downlinks</p>
+                            </div>
+                          </div>
+                          {stats.summary.pendingDownlinks > 0 && (
+                            <p className="mt-2 text-xs text-yellow-500">{stats.summary.pendingDownlinks} pending</p>
+                          )}
+                        </motion.div>
+
+                        {/* Avg RSSI */}
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+                          className="p-4 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 rounded-lg bg-purple-500/10"><Signal className="h-5 w-5 text-purple-500" /></div>
+                            <div>
+                              <p className="text-2xl font-bold">{avgRssi !== null ? `${avgRssi}` : '—'}</p>
+                              <p className="text-xs text-muted-foreground">Avg RSSI (dBm)</p>
+                            </div>
+                          </div>
+                          {avgRssi !== null && (
+                            <span className={`mt-2 inline-block px-2 py-0.5 rounded text-xs font-medium border ${getRssiBgColor(avgRssi)} ${getRssiColor(avgRssi)}`}>
+                              {getRssiLabel(avgRssi)}
+                            </span>
+                          )}
+                        </motion.div>
+
+                        {/* Avg SNR */}
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
+                          className="p-4 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 rounded-lg bg-indigo-500/10"><Activity className="h-5 w-5 text-indigo-500" /></div>
+                            <div>
+                              <p className="text-2xl font-bold">{avgSnr !== null ? `${avgSnr}` : '—'}</p>
+                              <p className="text-xs text-muted-foreground">Avg SNR (dB)</p>
+                            </div>
+                          </div>
+                          {avgSnr !== null && (
+                            <span className={`mt-2 inline-block px-2 py-0.5 rounded text-xs font-medium border ${avgSnr > 5 ? 'bg-green-500/10 border-green-500/30 text-green-500' : avgSnr > 0 ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-500' : 'bg-red-500/10 border-red-500/30 text-red-500'}`}>
+                              {avgSnr > 5 ? 'Good' : avgSnr > 0 ? 'Fair' : 'Poor'}
+                            </span>
+                          )}
+                        </motion.div>
+
+                        {/* Downlink Success Rate */}
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
+                          className="p-4 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 rounded-lg bg-emerald-500/10"><CheckCircle className="h-5 w-5 text-emerald-500" /></div>
+                            <div>
+                              <p className="text-2xl font-bold">{downlinkSuccessRate !== null ? `${downlinkSuccessRate}%` : '—'}</p>
+                              <p className="text-xs text-muted-foreground">DL Success Rate</p>
+                            </div>
+                          </div>
+                        </motion.div>
+
+                        {/* Pending Downlinks */}
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
+                          className="p-4 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                          <div className="flex items-center gap-3">
+                            <div className={`p-2 rounded-lg ${stats.summary.pendingDownlinks > 5 ? 'bg-orange-500/10' : 'bg-slate-500/10'}`}>
+                              <AlertTriangle className={`h-5 w-5 ${stats.summary.pendingDownlinks > 5 ? 'text-orange-500' : 'text-slate-500'}`} />
+                            </div>
+                            <div>
+                              <p className="text-2xl font-bold">{stats.summary.pendingDownlinks}</p>
+                              <p className="text-xs text-muted-foreground">Pending DLs</p>
+                            </div>
+                          </div>
+                          {stats.summary.pendingDownlinks > 5 && (
+                            <p className="mt-2 text-xs text-orange-500">Queue may be backed up</p>
+                          )}
+                        </motion.div>
                       </div>
                     )}
 
-                    {/* Charts */}
-                    {uplinkChartData.length > 0 && (
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* Uplink Activity Chart */}
-                        <div className="p-6 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
-                          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                            <Activity className="h-5 w-5 text-green-500" />
-                            Uplink Activity
-                          </h3>
+                    {/* Row 2: Message Volume — 2 charts side-by-side */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      {/* Uplink Activity Chart */}
+                      <div className="p-6 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                          <ArrowUpCircle className="h-5 w-5 text-green-500" />
+                          Uplink Activity
+                        </h3>
+                        {uplinkChartData.length > 0 ? (
                           <ResponsiveContainer width="100%" height={250}>
                             <AreaChart data={uplinkChartData}>
                               <defs>
@@ -678,120 +965,282 @@ export default function TTNPage() {
                               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
                               <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#888' }} />
                               <YAxis tick={{ fontSize: 11, fill: '#888' }} />
-                              <Tooltip
-                                contentStyle={{
-                                  backgroundColor: 'rgba(0,0,0,0.8)',
-                                  border: '1px solid rgba(16,185,129,0.3)',
-                                  borderRadius: '8px',
-                                  color: '#fff',
-                                }}
-                              />
-                              <Area
-                                type="monotone"
-                                dataKey="uplinks"
-                                stroke="#10b981"
-                                strokeWidth={2}
-                                fill="url(#uplinkGradient)"
-                              />
+                              <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '8px', color: '#fff' }} />
+                              <Area type="monotone" dataKey="uplinks" stroke="#10b981" strokeWidth={2} fill="url(#uplinkGradient)" />
                             </AreaChart>
                           </ResponsiveContainer>
-                        </div>
+                        ) : (
+                          <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">No uplink data for this period</div>
+                        )}
+                      </div>
 
-                        {/* Signal Quality Chart */}
-                        <div className="p-6 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
-                          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                            <Signal className="h-5 w-5 text-purple-500" />
-                            Signal Quality
-                          </h3>
+                      {/* Downlink Activity Chart */}
+                      <div className="p-6 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                          <ArrowDownCircle className="h-5 w-5 text-blue-500" />
+                          Downlink Activity
+                        </h3>
+                        {downlinkChartData.length > 0 ? (
+                          <ResponsiveContainer width="100%" height={250}>
+                            <AreaChart data={downlinkChartData}>
+                              <defs>
+                                <linearGradient id="downlinkGradient" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                              <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#888' }} />
+                              <YAxis tick={{ fontSize: 11, fill: '#888' }} />
+                              <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: '8px', color: '#fff' }} />
+                              <Area type="monotone" dataKey="downlinks" stroke="#3b82f6" strokeWidth={2} fill="url(#downlinkGradient)" />
+                            </AreaChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">No downlink data for this period</div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Row 3: Signal & Radio Analytics — 2 charts side-by-side */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      {/* Signal Quality over time */}
+                      <div className="p-6 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                          <Signal className="h-5 w-5 text-purple-500" />
+                          Signal Quality
+                        </h3>
+                        {uplinkChartData.length > 0 ? (
                           <ResponsiveContainer width="100%" height={250}>
                             <LineChart data={uplinkChartData}>
                               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
                               <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#888' }} />
                               <YAxis tick={{ fontSize: 11, fill: '#888' }} />
-                              <Tooltip
-                                contentStyle={{
-                                  backgroundColor: 'rgba(0,0,0,0.8)',
-                                  border: '1px solid rgba(168,85,247,0.3)',
-                                  borderRadius: '8px',
-                                  color: '#fff',
-                                }}
-                              />
+                              <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(168,85,247,0.3)', borderRadius: '8px', color: '#fff' }} />
+                              <Legend />
                               <Line type="monotone" dataKey="avgRssi" stroke="#a855f7" strokeWidth={2} dot={false} name="Avg RSSI (dBm)" />
                               <Line type="monotone" dataKey="avgSnr" stroke="#06b6d4" strokeWidth={2} dot={false} name="Avg SNR (dB)" />
                             </LineChart>
                           </ResponsiveContainer>
-                        </div>
+                        ) : (
+                          <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">No signal data for this period</div>
+                        )}
                       </div>
-                    )}
 
-                    {/* Top Devices & Recent Uplinks */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      {/* Top Devices */}
+                      {/* Spreading Factor Distribution */}
                       <div className="p-6 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
                         <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                          <Activity className="h-5 w-5 text-green-500" />
+                          <BarChart3 className="h-5 w-5 text-indigo-500" />
+                          Spreading Factor Distribution
+                        </h3>
+                        {sfChartData.length > 0 ? (
+                          <ResponsiveContainer width="100%" height={250}>
+                            <BarChart data={sfChartData}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                              <XAxis dataKey="sf" tick={{ fontSize: 11, fill: '#888' }} />
+                              <YAxis tick={{ fontSize: 11, fill: '#888' }} />
+                              <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '8px', color: '#fff' }} />
+                              <Bar dataKey="count" name="Messages" radius={[4, 4, 0, 0]}>
+                                {sfChartData.map((entry, index) => (
+                                  <Cell key={`sf-${index}`} fill={entry.fill} />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">No SF data for this period</div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Row 4: Infrastructure & Status — 2 charts side-by-side */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      {/* Gateway Traffic */}
+                      <div className="p-6 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                          <Server className="h-5 w-5 text-cyan-500" />
+                          Gateway Traffic
+                        </h3>
+                        {gatewayChartData.length > 0 ? (
+                          <ResponsiveContainer width="100%" height={250}>
+                            <BarChart data={gatewayChartData} layout="vertical">
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                              <XAxis type="number" tick={{ fontSize: 11, fill: '#888' }} />
+                              <YAxis dataKey="gateway" type="category" tick={{ fontSize: 10, fill: '#888' }} width={120} />
+                              <Tooltip
+                                contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(6,182,212,0.3)', borderRadius: '8px', color: '#fff' }}
+                                labelFormatter={(label: string) => {
+                                  const item = gatewayChartData.find((g) => g.gateway === label);
+                                  return item ? `${item.fullId} | RSSI: ${item.avgRssi} dBm | SNR: ${item.avgSnr} dB` : label;
+                                }}
+                              />
+                              <Bar dataKey="count" name="Uplinks" fill="#06b6d4" radius={[0, 4, 4, 0]} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">No gateway traffic data</div>
+                        )}
+                      </div>
+
+                      {/* Downlink Status Breakdown */}
+                      <div className="p-6 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                          <ArrowDownCircle className="h-5 w-5 text-orange-500" />
+                          Downlink Status Breakdown
+                        </h3>
+                        {statusChartData.length > 0 ? (
+                          <ResponsiveContainer width="100%" height={250}>
+                            <PieChart>
+                              <Pie
+                                data={statusChartData}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={60}
+                                outerRadius={90}
+                                paddingAngle={3}
+                                dataKey="value"
+                                nameKey="name"
+                              >
+                                {statusChartData.map((entry, index) => (
+                                  <Cell key={`status-${index}`} fill={entry.fill} />
+                                ))}
+                              </Pie>
+                              <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(249,115,22,0.3)', borderRadius: '8px', color: '#fff' }} />
+                              <Legend />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">No downlink status data</div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Row 5: Activity Patterns — 2 charts side-by-side */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      {/* Hourly Activity Heatmap */}
+                      <div className="p-6 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                          <Calendar className="h-5 w-5 text-amber-500" />
+                          Hourly Activity Pattern
+                        </h3>
+                        {hourlyData.length > 0 ? (
+                          <ResponsiveContainer width="100%" height={250}>
+                            <BarChart data={hourlyData}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                              <XAxis dataKey="hour" tick={{ fontSize: 10, fill: '#888' }} interval={1} />
+                              <YAxis tick={{ fontSize: 11, fill: '#888' }} />
+                              <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: '8px', color: '#fff' }} />
+                              <Bar dataKey="count" name="Messages" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">No hourly data for this period</div>
+                        )}
+                      </div>
+
+                      {/* Frequency Band Usage */}
+                      <div className="p-6 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                          <Wifi className="h-5 w-5 text-teal-500" />
+                          Frequency Band Usage (MHz)
+                        </h3>
+                        {frequencyData.length > 0 ? (
+                          <ResponsiveContainer width="100%" height={250}>
+                            <BarChart data={frequencyData}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                              <XAxis dataKey="freq" tick={{ fontSize: 10, fill: '#888' }} />
+                              <YAxis tick={{ fontSize: 11, fill: '#888' }} />
+                              <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(20,184,166,0.3)', borderRadius: '8px', color: '#fff' }} />
+                              <Bar dataKey="count" name="Uplinks" fill="#14b8a6" radius={[4, 4, 0, 0]} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">No frequency data for this period</div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Row 6: Detailed Tables — 2 panels side-by-side */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      {/* Top Active Devices */}
+                      <div className="p-6 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
+                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                          <Radio className="h-5 w-5 text-green-500" />
                           Top Active Devices
                         </h3>
-                        <div className="space-y-3">
-                          {stats?.topDevices.slice(0, 5).map((device) => (
-                            <div
-                              key={device._id}
-                              className="flex items-center justify-between p-3 rounded-lg bg-secondary/30"
-                            >
-                              <div className="flex items-center gap-3">
-                                <span className="text-sm font-mono">{device._id}</span>
-                              </div>
-                              <div className="text-right">
-                                <p className="text-sm font-semibold">{device.uplinkCount} uplinks</p>
-                                <p className="text-xs text-muted-foreground">
-                                  RSSI: {device.avgRssi?.toFixed(1)} dBm
-                                </p>
-                              </div>
-                            </div>
-                          ))}
-                          {(!stats?.topDevices || stats.topDevices.length === 0) && (
-                            <p className="text-muted-foreground text-sm text-center py-4">
-                              No device activity yet
-                            </p>
-                          )}
-                        </div>
+                        {stats?.topDevices && stats.topDevices.length > 0 ? (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="text-xs text-muted-foreground border-b border-border/50">
+                                  <th className="text-left py-2 pr-2">#</th>
+                                  <th className="text-left py-2 pr-2">Device ID</th>
+                                  <th className="text-right py-2 pr-2">Uplinks</th>
+                                  <th className="text-right py-2 pr-2">RSSI</th>
+                                  <th className="text-right py-2 pr-2">SNR</th>
+                                  <th className="text-right py-2">Last Seen</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {stats.topDevices.map((device, i) => (
+                                  <tr key={device._id} className="border-b border-border/30 hover:bg-secondary/20 cursor-pointer" onClick={() => navigateToLogsForDevice(device._id)}>
+                                    <td className="py-2 pr-2 text-muted-foreground">{i + 1}</td>
+                                    <td className="py-2 pr-2 font-mono text-xs">{device._id}</td>
+                                    <td className="py-2 pr-2 text-right font-semibold">{device.uplinkCount}</td>
+                                    <td className={`py-2 pr-2 text-right ${getRssiColor(device.avgRssi)}`}>{device.avgRssi?.toFixed(1)}</td>
+                                    <td className="py-2 pr-2 text-right">{device.avgSnr?.toFixed(1)}</td>
+                                    <td className="py-2 text-right text-xs text-muted-foreground">{formatRelativeTime(device.lastSeen)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <p className="text-muted-foreground text-sm text-center py-4">No device activity yet</p>
+                        )}
                       </div>
 
-                      {/* Recent Uplinks */}
+                      {/* Gateway Performance */}
                       <div className="p-6 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
                         <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                          <ArrowUpCircle className="h-5 w-5 text-purple-500" />
-                          Recent Uplinks
+                          <Server className="h-5 w-5 text-cyan-500" />
+                          Gateway Performance
                         </h3>
-                        <div className="space-y-3 max-h-64 overflow-y-auto">
-                          {uplinks.slice(0, 5).map((uplink) => (
-                            <div
-                              key={uplink._id}
-                              className="flex items-center justify-between p-3 rounded-lg bg-secondary/30"
-                            >
-                              <div>
-                                <p className="text-sm font-mono">{uplink.deviceId}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  Port {uplink.fPort} | {formatPayload(uplink.rawPayload)}
-                                </p>
-                              </div>
-                              <div className="text-right">
-                                <p className="text-xs text-muted-foreground">
-                                  {formatRelativeTime(uplink.receivedAt)}
-                                </p>
-                                <p className="text-xs">
-                                  <Signal className="h-3 w-3 inline mr-1" />
-                                  {uplink.rssi} dBm
-                                </p>
-                              </div>
-                            </div>
-                          ))}
-                          {uplinks.length === 0 && (
-                            <p className="text-muted-foreground text-sm text-center py-4">
-                              No uplinks received yet
-                            </p>
-                          )}
-                        </div>
+                        {gateways.length > 0 ? (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="text-xs text-muted-foreground border-b border-border/50">
+                                  <th className="text-left py-2 pr-2">Gateway</th>
+                                  <th className="text-center py-2 pr-2">Status</th>
+                                  <th className="text-right py-2 pr-2">Uplinks</th>
+                                  <th className="text-right py-2 pr-2">RSSI</th>
+                                  <th className="text-right py-2 pr-2">SNR</th>
+                                  <th className="text-right py-2">Last Seen</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {gateways.map((gw) => (
+                                  <tr key={gw._id} className="border-b border-border/30 hover:bg-secondary/20 cursor-pointer" onClick={() => navigateToLogsForGateway(gw.gatewayId)}>
+                                    <td className="py-2 pr-2 font-mono text-xs">{gw.name || gw.gatewayId}</td>
+                                    <td className="py-2 pr-2 text-center">
+                                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${gw.isOnline ? 'bg-green-500/10 text-green-500' : 'bg-slate-500/10 text-slate-500'}`}>
+                                        <span className={`h-1.5 w-1.5 rounded-full ${gw.isOnline ? 'bg-green-500' : 'bg-slate-500'}`} />
+                                        {gw.isOnline ? 'Online' : 'Offline'}
+                                      </span>
+                                    </td>
+                                    <td className="py-2 pr-2 text-right font-semibold">{gw.metrics.totalUplinksSeen}</td>
+                                    <td className={`py-2 pr-2 text-right ${getRssiColor(gw.metrics.avgRssi)}`}>{gw.metrics.avgRssi?.toFixed(1)}</td>
+                                    <td className="py-2 pr-2 text-right">{gw.metrics.avgSnr?.toFixed(1)}</td>
+                                    <td className="py-2 text-right text-xs text-muted-foreground">{formatRelativeTime(gw.lastSeen)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <p className="text-muted-foreground text-sm text-center py-4">No gateways discovered yet</p>
+                        )}
                       </div>
                     </div>
                   </motion.div>
@@ -1094,6 +1543,29 @@ export default function TTNPage() {
                             Clear
                           </button>
                         )}
+                        <div className="ml-auto flex items-center gap-2">
+                          {(['txt', 'csv', 'json'] as const).map((fmt) => (
+                            <button
+                              key={fmt}
+                              onClick={() => handleDownload(fmt, {
+                                eventType: 'uplink',
+                                deviceId: uplinkFilter.deviceId,
+                                gatewayId: uplinkFilter.gatewayId,
+                                startDate: uplinkFilter.startDate ? new Date(uplinkFilter.startDate).toISOString() : undefined,
+                                endDate: uplinkFilter.endDate ? new Date(uplinkFilter.endDate).toISOString() : undefined,
+                              })}
+                              disabled={downloading}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-medium border flex items-center gap-1.5 transition-all disabled:opacity-50 ${
+                                fmt === 'txt'
+                                  ? 'bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500/20'
+                                  : 'bg-secondary/50 hover:bg-secondary/80 border-border/50'
+                              }`}
+                            >
+                              {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                              {fmt.toUpperCase()}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </div>
 
@@ -1273,6 +1745,28 @@ export default function TTNPage() {
                             Clear
                           </button>
                         )}
+                        <div className="ml-auto flex items-center gap-2">
+                          {(['txt', 'csv', 'json'] as const).map((fmt) => (
+                            <button
+                              key={fmt}
+                              onClick={() => handleDownload(fmt, {
+                                eventType: 'downlink',
+                                deviceId: downlinkFilter.deviceId,
+                                startDate: downlinkFilter.startDate ? new Date(downlinkFilter.startDate).toISOString() : undefined,
+                                endDate: downlinkFilter.endDate ? new Date(downlinkFilter.endDate).toISOString() : undefined,
+                              })}
+                              disabled={downloading}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-medium border flex items-center gap-1.5 transition-all disabled:opacity-50 ${
+                                fmt === 'txt'
+                                  ? 'bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500/20'
+                                  : 'bg-secondary/50 hover:bg-secondary/80 border-border/50'
+                              }`}
+                            >
+                              {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                              {fmt.toUpperCase()}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </div>
 
@@ -1453,48 +1947,40 @@ export default function TTNPage() {
                           className="px-3 py-1.5 rounded-lg text-xs bg-secondary/50 border border-border/50 w-36"
                         />
 
-                        {/* Export Buttons */}
-                        <div className="ml-auto flex gap-2">
-                          {(['csv', 'json'] as const).map((fmt) => (
+                        {/* Download Buttons */}
+                        <div className="ml-auto flex items-center gap-2">
+                          <button
+                            onClick={() => handleDownload('txt', { forceLastDay: true })}
+                            disabled={downloading}
+                            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-500/20 text-green-500 border border-green-500/30 hover:bg-green-500/30 flex items-center gap-1.5 transition-all disabled:opacity-50"
+                          >
+                            {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                            Last 24h
+                          </button>
+                          <div className="h-4 w-px bg-border/50" />
+                          {(['txt', 'csv', 'json'] as const).map((fmt) => (
                             <button
                               key={fmt}
-                              onClick={async () => {
-                                if (!selectedApplication) return;
-                                const params = new URLSearchParams();
-                                if (logTimeMode === 'custom') {
-                                  if (logCustomStartDate) params.set('startDate', new Date(logCustomStartDate).toISOString());
-                                  if (logCustomEndDate) params.set('endDate', new Date(logCustomEndDate).toISOString());
-                                } else {
-                                  const now = new Date();
-                                  const rangeMs = logFilter.timeRange === '1h' ? 3600000 : logFilter.timeRange === '6h' ? 21600000 : 86400000;
-                                  params.set('startDate', new Date(now.getTime() - rangeMs).toISOString());
-                                }
-                                params.set('format', fmt);
-                                if (logFilter.deviceId !== 'all') params.set('deviceId', logFilter.deviceId);
-                                if (logFilter.gatewayId) params.set('gatewayId', logFilter.gatewayId);
-                                if (logFilter.eventType !== 'all') params.set('eventType', logFilter.eventType);
-                                const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-                                const resp = await fetch(
-                                  `${API_ENDPOINTS.TTN_LOGS_EXPORT(selectedApplication.applicationId)}?${params.toString()}`,
-                                  { headers: token ? { Authorization: `Bearer ${token}` } : {} }
-                                );
-                                if (!resp.ok) return;
-                                const blob = await resp.blob();
-                                const url = URL.createObjectURL(blob);
-                                const a = document.createElement('a');
-                                a.href = url;
-                                a.download = `ttn-logs-${selectedApplication.applicationId}.${fmt}`;
-                                a.click();
-                                URL.revokeObjectURL(url);
-                              }}
-                              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-secondary/50 hover:bg-secondary/80 border border-border/50 flex items-center gap-1.5 transition-all"
+                              onClick={() => handleDownload(fmt)}
+                              disabled={downloading}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-medium border flex items-center gap-1.5 transition-all disabled:opacity-50 ${
+                                fmt === 'txt'
+                                  ? 'bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500/20'
+                                  : 'bg-secondary/50 hover:bg-secondary/80 border-border/50'
+                              }`}
                             >
-                              <Download className="h-3.5 w-3.5" />
+                              {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
                               {fmt.toUpperCase()}
                             </button>
                           ))}
                         </div>
                       </div>
+                      {downloadError && (
+                        <div className="mt-2 flex items-center gap-1.5 text-xs text-red-500">
+                          <AlertCircle className="h-3.5 w-3.5" />
+                          {downloadError}
+                        </div>
+                      )}
                     </div>
 
                     {/* Log Count */}
