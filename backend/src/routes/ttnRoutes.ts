@@ -15,6 +15,7 @@ import {
   syncDevices,
   getDevices,
   getDevice,
+  updateDevice,
   getUplinks,
   sendDownlink,
   getDownlinks,
@@ -45,6 +46,7 @@ router.post('/applications/:applicationId/sync', syncDevices);
 // Device routes
 router.get('/applications/:applicationId/devices', getDevices);
 router.get('/applications/:applicationId/devices/:deviceId', getDevice);
+router.put('/applications/:applicationId/devices/:deviceId', updateDevice);
 
 // Uplink routes
 router.get('/applications/:applicationId/uplinks', getUplinks);

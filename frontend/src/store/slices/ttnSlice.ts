@@ -21,12 +21,14 @@ export interface TTNDevice {
   deviceId: string;
   applicationId: string;
   name: string;
+  displayName?: string;
   description?: string;
   devEui: string;
   joinEui?: string;
   devAddr?: string;
   isOnline: boolean;
   lastSeen?: string;
+  connectedSince?: string;
   lastUplink?: {
     timestamp: string;
     fPort: number;
@@ -63,6 +65,7 @@ export interface TTNGateway {
   };
   isOnline: boolean;
   lastSeen: string;
+  connectedSince?: string;
   metrics: {
     totalUplinksSeen: number;
     avgRssi: number;
@@ -220,6 +223,8 @@ interface TTNState {
   stats: TTNStats | null;
   loading: boolean;
   syncLoading: boolean;
+  logsLoading: boolean;
+  logsError: string | null;
   error: string | null;
   success: string | null;
 }
@@ -238,6 +243,8 @@ const initialState: TTNState = {
   stats: null,
   loading: false,
   syncLoading: false,
+  logsLoading: false,
+  logsError: null,
   error: null,
   success: null,
 };
@@ -342,6 +349,29 @@ export const fetchTTNDevices = createAsyncThunk(
       return await response.json();
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : 'Failed to fetch devices');
+    }
+  }
+);
+
+export const updateTTNDevice = createAsyncThunk(
+  'ttn/updateDevice',
+  async (
+    { applicationId, deviceId, displayName }: { applicationId: string; deviceId: string; displayName: string },
+    { rejectWithValue }
+  ) => {
+    try {
+      const response = await fetch(API_ENDPOINTS.TTN_UPDATE_DEVICE(applicationId, deviceId), {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ displayName }),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to update device');
+      }
+      return await response.json();
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Failed to update device');
     }
   }
 );
@@ -458,9 +488,21 @@ export const sendTTNDownlink = createAsyncThunk(
 
 export const fetchTTNStats = createAsyncThunk(
   'ttn/fetchStats',
-  async ({ applicationId, period = '24h' }: { applicationId: string; period?: string }, { rejectWithValue }) => {
+  async (
+    { applicationId, period = '24h', startDate, endDate }: {
+      applicationId: string;
+      period?: string;
+      startDate?: string;
+      endDate?: string;
+    },
+    { rejectWithValue }
+  ) => {
     try {
-      const response = await fetch(`${API_ENDPOINTS.TTN_STATS(applicationId)}?period=${period}`, {
+      const params = new URLSearchParams();
+      params.set('period', period);
+      if (startDate) params.set('startDate', startDate);
+      if (endDate) params.set('endDate', endDate);
+      const response = await fetch(`${API_ENDPOINTS.TTN_STATS(applicationId)}?${params.toString()}`, {
         headers: getAuthHeaders(),
       });
       if (!response.ok) throw new Error('Failed to fetch stats');
@@ -702,14 +744,28 @@ const ttnSlice = createSlice({
         state.loading = false;
         state.error = action.payload as string;
       })
+      // Update Device
+      .addCase(updateTTNDevice.fulfilled, (state, action) => {
+        const idx = state.devices.findIndex((d) => d._id === action.payload._id);
+        if (idx !== -1) state.devices[idx] = action.payload;
+      })
       // Fetch Uplinks
       .addCase(fetchTTNUplinks.fulfilled, (state, action) => {
         state.uplinks = action.payload;
       })
       // Fetch Logs
+      .addCase(fetchTTNLogs.pending, (state) => {
+        state.logsLoading = true;
+        state.logsError = null;
+      })
       .addCase(fetchTTNLogs.fulfilled, (state, action) => {
-        state.logs = action.payload.logs;
-        state.logsTotal = action.payload.total;
+        state.logsLoading = false;
+        state.logs = action.payload.logs || [];
+        state.logsTotal = action.payload.total || 0;
+      })
+      .addCase(fetchTTNLogs.rejected, (state, action) => {
+        state.logsLoading = false;
+        state.logsError = action.payload as string;
       })
       // Fetch Downlinks
       .addCase(fetchTTNDownlinks.fulfilled, (state, action) => {

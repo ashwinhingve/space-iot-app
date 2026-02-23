@@ -74,27 +74,32 @@ router.post('/:applicationId/uplink', verifyWebhookSignature, async (req: Reques
     await uplink.save();
 
     // Update device with latest uplink data
+    const existingDevice = await TTNDevice.findOne({ deviceId: uplinkData.deviceId, applicationId });
+    const updateFields: Record<string, unknown> = {
+      isOnline: true,
+      lastSeen: uplinkData.receivedAt,
+      devAddr: uplinkData.devAddr,
+      lastUplink: {
+        timestamp: uplinkData.receivedAt,
+        fPort: uplinkData.fPort,
+        fCnt: uplinkData.fCnt,
+        payload: uplinkData.rawPayload,
+        decodedPayload: uplinkData.decodedPayload,
+        rssi: uplinkData.rssi,
+        snr: uplinkData.snr,
+        spreadingFactor: uplinkData.spreadingFactor,
+        bandwidth: uplinkData.bandwidth,
+        frequency: uplinkData.frequency,
+        gatewayId: uplinkData.gatewayId,
+      },
+    };
+    if (!existingDevice?.connectedSince) {
+      updateFields.connectedSince = uplinkData.receivedAt;
+    }
     await TTNDevice.findOneAndUpdate(
       { deviceId: uplinkData.deviceId, applicationId },
       {
-        $set: {
-          isOnline: true,
-          lastSeen: uplinkData.receivedAt,
-          devAddr: uplinkData.devAddr,
-          lastUplink: {
-            timestamp: uplinkData.receivedAt,
-            fPort: uplinkData.fPort,
-            fCnt: uplinkData.fCnt,
-            payload: uplinkData.rawPayload,
-            decodedPayload: uplinkData.decodedPayload,
-            rssi: uplinkData.rssi,
-            snr: uplinkData.snr,
-            spreadingFactor: uplinkData.spreadingFactor,
-            bandwidth: uplinkData.bandwidth,
-            frequency: uplinkData.frequency,
-            gatewayId: uplinkData.gatewayId,
-          },
-        },
+        $set: updateFields,
         $inc: {
           'metrics.totalUplinks': 1,
         },
@@ -136,14 +141,21 @@ router.post('/:applicationId/join', verifyWebhookSignature, async (req: Request,
     const devAddr = endDeviceIds.dev_addr;
 
     // Update device with new session info
+    const existingDevice = await TTNDevice.findOne({ deviceId, applicationId });
+    const joinedAt = new Date();
+    const updateFields: Record<string, unknown> = {
+      isOnline: true,
+      lastSeen: joinedAt,
+      devAddr,
+    };
+    if (!existingDevice?.connectedSince) {
+      updateFields.connectedSince = joinedAt;
+    }
+
     await TTNDevice.findOneAndUpdate(
       { deviceId, applicationId },
       {
-        $set: {
-          isOnline: true,
-          lastSeen: new Date(),
-          devAddr,
-        },
+        $set: updateFields,
       }
     );
 

@@ -16,6 +16,9 @@ router.delete('/:id', valveController.deleteValve);
 
 // Control Operations (with rate limiting to prevent hardware damage)
 router.post('/:id/command', valveCommandLimiter, valveController.sendValveCommand);
+router.patch('/:id/mode', valveController.updateValveMode);
+router.patch('/:id/alarm-config', valveController.configureValveAlarm);
+router.patch('/:id/timer', valveController.configureValveTimer);
 router.get('/:id/status', valveController.getValveStatus);
 router.get('/:id/history', valveController.getValveHistory);
 

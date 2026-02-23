@@ -53,12 +53,19 @@ export const API_ENDPOINTS = {
   COMPONENT_MAINTENANCE: (id: string) => `${API_BASE_URL}/api/components/${id}/maintenance`,
   COMPONENTS_BY_MANIFOLD: (manifoldId: string) => `${API_BASE_URL}/api/components/manifold/${manifoldId}`,
 
+  // Network Devices (LoRaWAN, Wi-Fi, Bluetooth, GSM)
+  NETWORK_DEVICES: `${API_BASE_URL}/api/network-devices`,
+  NETWORK_DEVICE_DETAIL: (id: string) => `${API_BASE_URL}/api/network-devices/${id}`,
+  NETWORK_DEVICE_STATUS: (id: string) => `${API_BASE_URL}/api/network-devices/${id}/status`,
+  NETWORK_DEVICE_STATS: `${API_BASE_URL}/api/network-devices/stats`,
+
   // TTN (The Things Network)
   TTN_APPLICATIONS: `${API_BASE_URL}/api/ttn/applications`,
   TTN_APPLICATION_DETAIL: (id: string) => `${API_BASE_URL}/api/ttn/applications/${id}`,
   TTN_SYNC_DEVICES: (appId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/sync`,
   TTN_DEVICES: (appId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/devices`,
   TTN_DEVICE_DETAIL: (appId: string, deviceId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/devices/${deviceId}`,
+  TTN_UPDATE_DEVICE: (appId: string, deviceId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/devices/${deviceId}`,
   TTN_UPLINKS: (appId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/uplinks`,
   TTN_DEVICE_UPLINKS: (appId: string, deviceId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/devices/${deviceId}/uplinks`,
   TTN_SEND_DOWNLINK: (appId: string, deviceId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/devices/${deviceId}/downlink`,

@@ -18,6 +18,7 @@ import valveRoutes from './routes/valveRoutes';
 import componentRoutes from './routes/componentRoutes';
 import ttnRoutes from './routes/ttnRoutes';
 import ttnWebhookRoutes from './routes/ttnWebhookRoutes';
+import networkDeviceRoutes from './routes/networkDeviceRoutes';
 import { Device } from './models/Device';
 import { Manifold } from './models/Manifold';
 import { Valve } from './models/Valve';
@@ -195,15 +196,40 @@ const handleMqttMessage = async (topic: string, message: Buffer) => {
 
       if (type === 'status') {
         const statusData = JSON.parse(message.toString());
-        for (const valveData of statusData.valves || []) {
-          const valve = await Valve.findOneAndUpdate(
-            { manifoldId: { $exists: true }, valveNumber: valveData.valveNumber },
-            { 'operationalData.currentStatus': valveData.status, updatedAt: new Date() },
-            { new: true }
-          );
-          if (valve) {
-            await Manifold.findByIdAndUpdate(valve.manifoldId, { updatedAt: new Date() });
+        const manifold = await Manifold.findOne({ manifoldId });
+        if (manifold) {
+          for (const valveData of statusData.valves || []) {
+            const updatedValve = await Valve.findOneAndUpdate(
+              { manifoldId: manifold._id, valveNumber: valveData.valveNumber },
+              {
+                'operationalData.currentStatus': valveData.status,
+                ...(valveData.mode ? { 'operationalData.mode': valveData.mode } : {}),
+                updatedAt: new Date()
+              },
+              { new: true }
+            );
+            if (
+              updatedValve?.alarmConfig?.enabled &&
+              updatedValve.alarmConfig.ruleType === 'STATUS' &&
+              updatedValve.alarmConfig.metric === 'status' &&
+              valveData.status === updatedValve.alarmConfig.triggerStatus
+            ) {
+              const existingActive = updatedValve.alarms.find(
+                (alarm) => !alarm.acknowledged && alarm.message === `Valve ${updatedValve.valveNumber} status ${valveData.status}`
+              );
+              if (!existingActive) {
+                updatedValve.alarms.push({
+                  alarmId: `AL-${Date.now()}-${updatedValve.valveNumber}`,
+                  severity: valveData.status === 'FAULT' ? 'CRITICAL' : 'WARNING',
+                  message: `Valve ${updatedValve.valveNumber} status ${valveData.status}`,
+                  timestamp: new Date(),
+                  acknowledged: false
+                } as any);
+                await updatedValve.save();
+              }
+            }
           }
+          await Manifold.findByIdAndUpdate(manifold._id, { updatedAt: new Date() });
         }
         io.to(`manifold-${manifoldId}`).emit('manifoldStatus', {
           manifoldId,
@@ -400,11 +426,18 @@ const checkDevicesStatus = async () => {
     if (now.getTime() - lastSeen.getTime() > 15000) {
       console.log(`Device ${deviceId} has timed out - marking as offline`);
       try {
-        const device = await Device.findOneAndUpdate(
+        let device = await Device.findOneAndUpdate(
           { mqttTopic: `devices/${deviceId}` },
           { status: 'offline' },
           { new: true }
         );
+        if (!device) {
+          device = await Device.findOneAndUpdate(
+            { mqttTopic: { $regex: `/${deviceId}$`, $options: 'i' } },
+            { status: 'offline' },
+            { new: true }
+          );
+        }
         if (device) {
           io.emit('deviceStatus', { deviceId: device._id, status: 'offline' });
           deviceHeartbeats.set(deviceId, new Date(now.getTime() - 14000));
@@ -587,6 +620,7 @@ app.use('/api/valves', valveRoutes);
 app.use('/api/components', componentRoutes);
 app.use('/api/ttn', ttnRoutes);
 app.use('/api/ttn/webhook', ttnWebhookRoutes);
+app.use('/api/network-devices', networkDeviceRoutes);
 
 // ============================================================
 // ===== SERVER STARTUP =====

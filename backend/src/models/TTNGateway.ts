@@ -13,6 +13,7 @@ export interface ITTNGateway extends mongoose.Document {
   };
   isOnline: boolean;
   lastSeen: Date;
+  connectedSince?: Date;
   metrics: {
     totalUplinksSeen: number;
     avgRssi: number;
@@ -61,6 +62,9 @@ const ttnGatewaySchema = new mongoose.Schema({
   lastSeen: {
     type: Date,
     default: Date.now
+  },
+  connectedSince: {
+    type: Date
   },
   metrics: {
     totalUplinksSeen: { type: Number, default: 0 },

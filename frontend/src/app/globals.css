@@ -1812,6 +1812,31 @@ input:focus, textarea:focus, select:focus {
   border: 1px solid rgba(99, 102, 241, 0.25);
 }
 
+/* Dark-native form controls for dropdown/date pickers */
+.dark select,
+.dark option,
+.dark optgroup,
+.dark input[type="date"],
+.dark input[type="time"],
+.dark input[type="datetime-local"] {
+  color-scheme: dark;
+}
+
+.dark select,
+.dark input[type="date"],
+.dark input[type="time"],
+.dark input[type="datetime-local"] {
+  background-color: hsl(var(--card));
+  color: hsl(var(--foreground));
+  border-color: hsl(var(--border));
+}
+
+.dark select option,
+.dark select optgroup {
+  background-color: hsl(var(--card));
+  color: hsl(var(--foreground));
+}
+
 /* Arrow button with animation */
 .arrow-button {
   display: inline-flex;

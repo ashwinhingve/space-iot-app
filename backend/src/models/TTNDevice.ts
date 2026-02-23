@@ -5,6 +5,7 @@ export interface ITTNDevice extends mongoose.Document {
   applicationId: string;
   owner: mongoose.Types.ObjectId;
   name: string;
+  displayName?: string;
   description?: string;
   devEui: string;
   joinEui?: string;
@@ -12,6 +13,7 @@ export interface ITTNDevice extends mongoose.Document {
   // Device status
   isOnline: boolean;
   lastSeen?: Date;
+  connectedSince?: Date;
   // Latest data
   lastUplink?: {
     timestamp: Date;
@@ -62,6 +64,10 @@ const ttnDeviceSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
+  displayName: {
+    type: String,
+    trim: true
+  },
   description: {
     type: String,
     trim: true
@@ -87,6 +93,9 @@ const ttnDeviceSchema = new mongoose.Schema({
     default: false
   },
   lastSeen: {
+    type: Date
+  },
+  connectedSince: {
     type: Date
   },
   lastUplink: {

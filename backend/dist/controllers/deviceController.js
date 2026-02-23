@@ -118,6 +118,26 @@ const controlDevice = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 console.error('Error publishing MQTT message:', err);
             }
         });
+        const nextStatus = Number(value) > 0 ? 'online' : device.status;
+        device.status = nextStatus;
+        device.lastSeen = new Date();
+        device.lastData = {
+            timestamp: new Date(),
+            value: Number(value) || 0
+        };
+        device.settings = Object.assign(Object.assign({}, device.settings), { value: Number(value) || 0 });
+        yield device.save();
+        const io = req.app.get('io');
+        if (io) {
+            io.emit('deviceData', {
+                deviceId: device._id,
+                data: {
+                    value: Number(value) || 0,
+                    timestamp: new Date().toISOString()
+                }
+            });
+            io.emit('deviceStatus', { deviceId: device._id, status: device.status });
+        }
         res.json({ message: 'Control command sent successfully' });
     }
     catch (error) {

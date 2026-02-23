@@ -6,8 +6,8 @@ import { controlDevice, updateDeviceStatus, updateDeviceData, saveWiFiConfig, fe
 import { motion, AnimatePresence } from 'framer-motion';
 import { Wifi, X, Eye, EyeOff, CheckCircle, AlertCircle, Loader2, Copy, Check, Edit3, Trash2, MoreVertical } from 'lucide-react';
 import { AppDispatch, RootState } from '@/store/store';
-import { io } from 'socket.io-client';
-import { SOCKET_CONFIG } from '@/lib/config';
+import { Socket } from 'socket.io-client';
+import { createAuthenticatedSocket } from '@/lib/socket';
 
 // ============================================
 // CONNECTION TOGGLE COMPONENT
@@ -772,7 +772,7 @@ export const ModernDeviceCard = ({ device }: ModernDeviceCardProps) => {
   const [humidity, setHumidity] = useState<number | undefined>(device.settings?.humidity);
   const [lastValue, setLastValue] = useState<number | undefined>(device.settings?.value ?? device.lastData?.value);
 
-  const socketRef = React.useRef<ReturnType<typeof io> | null>(null);
+  const socketRef = React.useRef<Socket | null>(null);
   const menuRef = React.useRef<HTMLDivElement>(null);
 
   // Close menu when clicking outside
@@ -793,7 +793,7 @@ export const ModernDeviceCard = ({ device }: ModernDeviceCardProps) => {
   }, [showMenu]);
 
   useEffect(() => {
-    socketRef.current = io(SOCKET_CONFIG.URL, SOCKET_CONFIG.OPTIONS);
+    socketRef.current = createAuthenticatedSocket();
     const socket = socketRef.current;
 
     socket.on('connect', () => {

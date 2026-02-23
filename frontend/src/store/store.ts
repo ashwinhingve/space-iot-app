@@ -4,6 +4,7 @@ import deviceReducer from './slices/deviceSlice';
 import manifoldReducer from './slices/manifoldSlice';
 import dashboardReducer from './slices/dashboardSlice';
 import ttnReducer from './slices/ttnSlice';
+import networkDeviceReducer from './slices/networkDeviceSlice';
 
 export const store = configureStore({
   reducer: {
@@ -12,6 +13,7 @@ export const store = configureStore({
     manifolds: manifoldReducer,
     dashboard: dashboardReducer,
     ttn: ttnReducer,
+    networkDevices: networkDeviceReducer,
   },
 });
 

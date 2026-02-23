@@ -4,7 +4,6 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useDispatch, useSelector } from 'react-redux';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { io } from 'socket.io-client';
 import Link from 'next/link';
 import Image from 'next/image';
 import { MainLayout } from '@/components/MainLayout';
@@ -23,7 +22,7 @@ import {
   addActivity,
   acknowledgeAlert,
 } from '@/store/slices/dashboardSlice';
-import { SOCKET_CONFIG } from '@/lib/config';
+import { createAuthenticatedSocket } from '@/lib/socket';
 import {
   Wifi,
   WifiOff,
@@ -173,7 +172,7 @@ export default function DashboardPage() {
 
   // ─── Socket.io connection ──────────────────────────────────
   useEffect(() => {
-    const newSocket = io(SOCKET_CONFIG.URL, SOCKET_CONFIG.OPTIONS);
+    const newSocket = createAuthenticatedSocket();
 
     newSocket.on('connect', () => {
       setIsConnected(true);

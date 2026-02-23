@@ -29,6 +29,7 @@ export interface IValve extends mongoose.Document {
     };
     cycleCount: number;
     totalRuntime: number;
+    autoOffDurationSec: number;
   };
 
   position: {
@@ -46,12 +47,24 @@ export interface IValve extends mongoose.Document {
     acknowledgedAt?: Date;
   }>;
 
+  alarmConfig: {
+    enabled: boolean;
+    ruleType: 'THRESHOLD' | 'STATUS';
+    metric: 'pressure' | 'flow' | 'runtime' | 'status';
+    operator: '>' | '<' | '>=' | '<=' | '==' | '!=';
+    threshold?: number;
+    triggerStatus?: 'FAULT' | 'OFF';
+    notify: boolean;
+  };
+
   schedules: Array<{
     scheduleId: string;
     enabled: boolean;
     cronExpression: string;
     action: 'ON' | 'OFF';
     duration: number;
+    startAt?: Date;
+    endAt?: Date;
     createdBy: mongoose.Types.ObjectId;
     createdAt: Date;
   }>;
@@ -162,6 +175,11 @@ const valveSchema = new mongoose.Schema({
       type: Number,
       default: 0,
       min: [0, 'Total runtime cannot be negative']
+    },
+    autoOffDurationSec: {
+      type: Number,
+      default: 0,
+      min: [0, 'Auto-off duration cannot be negative']
     }
   },
 
@@ -212,6 +230,40 @@ const valveSchema = new mongoose.Schema({
     }
   }],
 
+  alarmConfig: {
+    enabled: {
+      type: Boolean,
+      default: false
+    },
+    ruleType: {
+      type: String,
+      enum: ['THRESHOLD', 'STATUS'],
+      default: 'STATUS'
+    },
+    metric: {
+      type: String,
+      enum: ['pressure', 'flow', 'runtime', 'status'],
+      default: 'status'
+    },
+    operator: {
+      type: String,
+      enum: ['>', '<', '>=', '<=', '==', '!='],
+      default: '=='
+    },
+    threshold: {
+      type: Number
+    },
+    triggerStatus: {
+      type: String,
+      enum: ['FAULT', 'OFF'],
+      default: 'FAULT'
+    },
+    notify: {
+      type: Boolean,
+      default: true
+    }
+  },
+
   schedules: [{
     scheduleId: {
       type: String,
@@ -223,7 +275,7 @@ const valveSchema = new mongoose.Schema({
     },
     cronExpression: {
       type: String,
-      required: true
+      default: ''
     },
     action: {
       type: String,
@@ -237,6 +289,12 @@ const valveSchema = new mongoose.Schema({
       type: Number,
       default: 0,
       min: [0, 'Duration cannot be negative']
+    },
+    startAt: {
+      type: Date
+    },
+    endAt: {
+      type: Date
     },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,

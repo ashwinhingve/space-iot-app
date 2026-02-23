@@ -346,16 +346,89 @@ export const syncDevices = async (req: Request, res: Response) => {
 export const getDevices = async (req: Request, res: Response) => {
   try {
     const { applicationId } = req.params;
+    const ownerId = req.user._id;
+
+    // Backfill missing connectedSince using the first successful uplink timestamp.
+    const devicesMissingConnectedSince = await TTNDevice.find({
+      applicationId,
+      owner: ownerId,
+      $or: [{ connectedSince: { $exists: false } }, { connectedSince: null }],
+    }).select('deviceId').lean();
+
+    if (devicesMissingConnectedSince.length > 0) {
+      const deviceIds = devicesMissingConnectedSince
+        .map((d) => d.deviceId)
+        .filter(Boolean);
+
+      if (deviceIds.length > 0) {
+        const firstUplinks = await TTNUplink.aggregate([
+          {
+            $match: {
+              applicationId,
+              owner: ownerId,
+              deviceId: { $in: deviceIds },
+            },
+          },
+          {
+            $group: {
+              _id: '$deviceId',
+              firstSeen: { $min: '$receivedAt' },
+            },
+          },
+        ]);
+
+        if (firstUplinks.length > 0) {
+          await TTNDevice.bulkWrite(
+            firstUplinks.map((entry) => ({
+              updateOne: {
+                filter: {
+                  applicationId,
+                  owner: ownerId,
+                  deviceId: entry._id,
+                  $or: [{ connectedSince: { $exists: false } }, { connectedSince: null }],
+                },
+                update: { $set: { connectedSince: entry.firstSeen } },
+              },
+            }))
+          );
+        }
+      }
+    }
 
     const devices = await TTNDevice.find({
       applicationId,
-      owner: req.user._id,
+      owner: ownerId,
     }).sort({ lastSeen: -1 });
 
     res.json(devices);
   } catch (error) {
     console.error('Error fetching TTN devices:', error);
     res.status(500).json({ error: 'Failed to fetch devices' });
+  }
+};
+
+/**
+ * Update a device's display name
+ */
+export const updateDevice = async (req: Request, res: Response) => {
+  try {
+    const { applicationId, deviceId } = req.params;
+    const { displayName } = req.body;
+
+    const device = await TTNDevice.findOneAndUpdate(
+      { deviceId, applicationId, owner: req.user._id },
+      { $set: { displayName } },
+      { new: true }
+    );
+
+    if (!device) {
+      return res.status(404).json({ error: 'Device not found' });
+    }
+
+    res.json(device);
+  } catch (error) {
+    console.error('Error updating TTN device:', error);
+    res.status(500).json({ error: 'Failed to update device' });
   }
 };
 
@@ -588,26 +661,31 @@ export const getDownlinks = async (req: Request, res: Response) => {
 export const getStats = async (req: Request, res: Response) => {
   try {
     const { applicationId } = req.params;
-    const { period = '24h' } = req.query;
+    const { period = '24h', startDate: startDateParam, endDate: endDateParam } = req.query;
 
-    // Calculate time range
+    // Calculate time range — explicit dates override period
     const now = new Date();
+    const endDate: Date = endDateParam ? new Date(endDateParam as string) : now;
     let startDate: Date;
-    switch (period) {
-      case '1h':
-        startDate = new Date(now.getTime() - 60 * 60 * 1000);
-        break;
-      case '24h':
-        startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-        break;
-      case '7d':
-        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        break;
-      case '30d':
-        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        break;
-      default:
-        startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    if (startDateParam) {
+      startDate = new Date(startDateParam as string);
+    } else {
+      switch (period) {
+        case '1h':
+          startDate = new Date(now.getTime() - 60 * 60 * 1000);
+          break;
+        case '24h':
+          startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+          break;
+        case '7d':
+          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        case '30d':
+          startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          break;
+        default:
+          startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      }
     }
 
     const baseQuery = {
@@ -629,7 +707,7 @@ export const getStats = async (req: Request, res: Response) => {
       TTNDevice.countDocuments(baseQuery),
       TTNDevice.countDocuments({ ...baseQuery, isOnline: true }),
       TTNUplink.countDocuments(baseQuery),
-      TTNUplink.countDocuments({ ...baseQuery, receivedAt: { $gte: startDate } }),
+      TTNUplink.countDocuments({ ...baseQuery, receivedAt: { $gte: startDate, $lte: endDate } }),
       TTNDownlink.countDocuments(baseQuery),
       TTNDownlink.countDocuments({ ...baseQuery, status: { $in: ['PENDING', 'SCHEDULED'] } }),
       TTNGateway.countDocuments(baseQuery),
@@ -652,7 +730,7 @@ export const getStats = async (req: Request, res: Response) => {
     ] = await Promise.all([
       // Uplink time series
       TTNUplink.aggregate([
-        { $match: { applicationId, receivedAt: { $gte: startDate } } },
+        { $match: { applicationId, receivedAt: { $gte: startDate, $lte: endDate } } },
         {
           $group: {
             _id: { $dateToString: { format: timeFormat, date: '$receivedAt' } },
@@ -666,7 +744,7 @@ export const getStats = async (req: Request, res: Response) => {
 
       // Top devices by uplink count
       TTNUplink.aggregate([
-        { $match: { applicationId, receivedAt: { $gte: startDate } } },
+        { $match: { applicationId, receivedAt: { $gte: startDate, $lte: endDate } } },
         {
           $group: {
             _id: '$deviceId',
@@ -682,7 +760,7 @@ export const getStats = async (req: Request, res: Response) => {
 
       // Downlink time series
       TTNDownlink.aggregate([
-        { $match: { applicationId, owner: req.user._id, createdAt: { $gte: startDate } } },
+        { $match: { applicationId, owner: req.user._id, createdAt: { $gte: startDate, $lte: endDate } } },
         {
           $group: {
             _id: { $dateToString: { format: timeFormat, date: '$createdAt' } },
@@ -694,7 +772,7 @@ export const getStats = async (req: Request, res: Response) => {
 
       // Spreading Factor distribution
       TTNUplink.aggregate([
-        { $match: { applicationId, receivedAt: { $gte: startDate }, spreadingFactor: { $exists: true } } },
+        { $match: { applicationId, spreadingFactor: { $exists: true }, receivedAt: { $gte: startDate, $lte: endDate } } },
         {
           $group: {
             _id: '$spreadingFactor',
@@ -706,7 +784,7 @@ export const getStats = async (req: Request, res: Response) => {
 
       // Downlink status breakdown
       TTNDownlink.aggregate([
-        { $match: { applicationId, owner: req.user._id, createdAt: { $gte: startDate } } },
+        { $match: { applicationId, owner: req.user._id, createdAt: { $gte: startDate, $lte: endDate } } },
         {
           $group: {
             _id: '$status',
@@ -718,7 +796,7 @@ export const getStats = async (req: Request, res: Response) => {
 
       // Per-gateway traffic (top 10)
       TTNUplink.aggregate([
-        { $match: { applicationId, receivedAt: { $gte: startDate }, gatewayId: { $exists: true, $ne: null } } },
+        { $match: { applicationId, gatewayId: { $exists: true, $ne: null }, receivedAt: { $gte: startDate, $lte: endDate } } },
         {
           $group: {
             _id: '$gatewayId',
@@ -733,7 +811,7 @@ export const getStats = async (req: Request, res: Response) => {
 
       // Hourly message heatmap (0-23)
       TTNUplink.aggregate([
-        { $match: { applicationId, receivedAt: { $gte: startDate } } },
+        { $match: { applicationId, receivedAt: { $gte: startDate, $lte: endDate } } },
         {
           $group: {
             _id: { $hour: '$receivedAt' },
@@ -946,6 +1024,17 @@ function base64ToAscii(b64: string): string {
 }
 
 /**
+ * Format timestamp as YYYY-MM-DD HH:mm:ss (UTC)
+ */
+function formatExportTimestamp(value: unknown): string {
+  if (!value) return '';
+  const date = value instanceof Date ? value : new Date(value as string | number);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (num: number) => String(num).padStart(2, '0');
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
+}
+
+/**
  * Export logs as CSV or JSON
  */
 export const exportLogs = async (req: Request, res: Response) => {
@@ -1037,15 +1126,15 @@ export const exportLogs = async (req: Request, res: Response) => {
       const lines: string[] = [];
       lines.push('=== TTN Logs Export ===');
       lines.push(`Application: ${applicationId}`);
-      lines.push(`Period: ${start.toISOString()} to ${end.toISOString()}`);
-      lines.push(`Exported: ${now.toISOString()}`);
+      lines.push(`Period: ${formatExportTimestamp(start)} to ${formatExportTimestamp(end)}`);
+      lines.push(`Exported: ${formatExportTimestamp(now)}`);
       lines.push(`Filters: Device=${deviceId || 'all'}, Gateway=${gatewayId || 'all'}, Type=${eventType}`);
       lines.push(`Total: ${merged.length} events`);
       lines.push('========================================');
       lines.push('');
 
       for (const entry of merged) {
-        const ts = entry._timestamp.toISOString();
+        const ts = formatExportTimestamp(entry._timestamp);
         const d = entry.data;
         if (entry._type === 'uplink') {
           const hex = d.rawPayload ? base64ToHex(d.rawPayload as string) : '';
@@ -1078,6 +1167,11 @@ export const exportLogs = async (req: Request, res: Response) => {
         }
         return str;
       };
+      const csvTimestampText = (value: unknown): string => {
+        const ts = formatExportTimestamp(value);
+        // Keep timestamp as text for spreadsheet apps to avoid #### rendering.
+        return ts ? `'${ts}` : '';
+      };
 
       const header = 'Type,Timestamp,Device ID,fPort,Payload,RSSI,SNR,SF,Frequency,Gateway,Status';
       const rows: string[] = [];
@@ -1085,7 +1179,7 @@ export const exportLogs = async (req: Request, res: Response) => {
       for (const u of uplinkResults) {
         rows.push([
           'uplink',
-          csvEscape((u.receivedAt as Date)?.toISOString()),
+          csvEscape(csvTimestampText(u.receivedAt)),
           csvEscape(u.deviceId),
           csvEscape(u.fPort),
           csvEscape(u.rawPayload ? base64ToAscii(u.rawPayload as string) : ''),
@@ -1101,7 +1195,7 @@ export const exportLogs = async (req: Request, res: Response) => {
       for (const d of downlinkResults) {
         rows.push([
           'downlink',
-          csvEscape((d.createdAt as Date)?.toISOString()),
+          csvEscape(csvTimestampText(d.createdAt)),
           csvEscape(d.deviceId),
           csvEscape(d.fPort),
           csvEscape(d.payload ? base64ToAscii(d.payload as string) : ''),
@@ -1127,13 +1221,17 @@ export const exportLogs = async (req: Request, res: Response) => {
     res.json({
       uplinks: uplinkResults.map((u) => ({
         ...u,
+        receivedAt: formatExportTimestamp(u.receivedAt),
         payloadText: u.rawPayload ? base64ToAscii(u.rawPayload as string) : '',
       })),
       downlinks: downlinkResults.map((d) => ({
         ...d,
+        createdAt: formatExportTimestamp(d.createdAt),
+        sentAt: formatExportTimestamp(d.sentAt),
+        acknowledgedAt: formatExportTimestamp(d.acknowledgedAt),
         payloadText: d.payload ? base64ToAscii(d.payload as string) : '',
       })),
-      exportedAt: new Date().toISOString(),
+      exportedAt: formatExportTimestamp(new Date()),
       applicationId,
     });
   } catch (error) {

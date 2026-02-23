@@ -64,6 +64,7 @@ const valveRoutes_1 = __importDefault(require("./routes/valveRoutes"));
 const componentRoutes_1 = __importDefault(require("./routes/componentRoutes"));
 const ttnRoutes_1 = __importDefault(require("./routes/ttnRoutes"));
 const ttnWebhookRoutes_1 = __importDefault(require("./routes/ttnWebhookRoutes"));
+const networkDeviceRoutes_1 = __importDefault(require("./routes/networkDeviceRoutes"));
 const Device_1 = require("./models/Device");
 const Manifold_1 = require("./models/Manifold");
 const Valve_1 = require("./models/Valve");
@@ -72,6 +73,9 @@ const ValveCommand_1 = require("./models/ValveCommand");
 const validateEnv_1 = require("./utils/validateEnv");
 const awsIotService_1 = require("./services/awsIotService");
 const ttnMqttService_1 = require("./services/ttnMqttService");
+const TTNApplication_1 = require("./models/TTNApplication");
+const TTNDevice_1 = require("./models/TTNDevice");
+const ttnService_1 = require("./services/ttnService");
 // Load environment variables
 dotenv_1.default.config();
 // Validate environment variables before proceeding
@@ -129,7 +133,7 @@ app.use(express_1.default.json());
 const deviceHeartbeats = new Map();
 // MQTT message handler function - works with both Aedes and AWS IoT
 const handleMqttMessage = (topic, message) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g;
     const topicParts = topic.split('/');
     const [prefix, deviceId, type] = topicParts;
     console.log(`MQTT message received on topic: ${topic}`);
@@ -204,11 +208,28 @@ const handleMqttMessage = (topic, message) => __awaiter(void 0, void 0, void 0, 
             console.log(`Processing manifold ${type} for ${manifoldId}`);
             if (type === 'status') {
                 const statusData = JSON.parse(message.toString());
-                for (const valveData of statusData.valves || []) {
-                    const valve = yield Valve_1.Valve.findOneAndUpdate({ manifoldId: { $exists: true }, valveNumber: valveData.valveNumber }, { 'operationalData.currentStatus': valveData.status, updatedAt: new Date() }, { new: true });
-                    if (valve) {
-                        yield Manifold_1.Manifold.findByIdAndUpdate(valve.manifoldId, { updatedAt: new Date() });
+                const manifold = yield Manifold_1.Manifold.findOne({ manifoldId });
+                if (manifold) {
+                    for (const valveData of statusData.valves || []) {
+                        const updatedValve = yield Valve_1.Valve.findOneAndUpdate({ manifoldId: manifold._id, valveNumber: valveData.valveNumber }, Object.assign(Object.assign({ 'operationalData.currentStatus': valveData.status }, (valveData.mode ? { 'operationalData.mode': valveData.mode } : {})), { updatedAt: new Date() }), { new: true });
+                        if (((_g = updatedValve === null || updatedValve === void 0 ? void 0 : updatedValve.alarmConfig) === null || _g === void 0 ? void 0 : _g.enabled) &&
+                            updatedValve.alarmConfig.ruleType === 'STATUS' &&
+                            updatedValve.alarmConfig.metric === 'status' &&
+                            valveData.status === updatedValve.alarmConfig.triggerStatus) {
+                            const existingActive = updatedValve.alarms.find((alarm) => !alarm.acknowledged && alarm.message === `Valve ${updatedValve.valveNumber} status ${valveData.status}`);
+                            if (!existingActive) {
+                                updatedValve.alarms.push({
+                                    alarmId: `AL-${Date.now()}-${updatedValve.valveNumber}`,
+                                    severity: valveData.status === 'FAULT' ? 'CRITICAL' : 'WARNING',
+                                    message: `Valve ${updatedValve.valveNumber} status ${valveData.status}`,
+                                    timestamp: new Date(),
+                                    acknowledged: false
+                                });
+                                yield updatedValve.save();
+                            }
+                        }
                     }
+                    yield Manifold_1.Manifold.findByIdAndUpdate(manifold._id, { updatedAt: new Date() });
                 }
                 io.to(`manifold-${manifoldId}`).emit('manifoldStatus', {
                     manifoldId,
@@ -379,7 +400,10 @@ const checkDevicesStatus = () => __awaiter(void 0, void 0, void 0, function* () 
         if (now.getTime() - lastSeen.getTime() > 15000) {
             console.log(`Device ${deviceId} has timed out - marking as offline`);
             try {
-                const device = yield Device_1.Device.findOneAndUpdate({ mqttTopic: `devices/${deviceId}` }, { status: 'offline' }, { new: true });
+                let device = yield Device_1.Device.findOneAndUpdate({ mqttTopic: `devices/${deviceId}` }, { status: 'offline' }, { new: true });
+                if (!device) {
+                    device = yield Device_1.Device.findOneAndUpdate({ mqttTopic: { $regex: `/${deviceId}$`, $options: 'i' } }, { status: 'offline' }, { new: true });
+                }
                 if (device) {
                     io.emit('deviceStatus', { deviceId: device._id, status: 'offline' });
                     deviceHeartbeats.set(deviceId, new Date(now.getTime() - 14000));
@@ -553,6 +577,7 @@ app.use('/api/valves', valveRoutes_1.default);
 app.use('/api/components', componentRoutes_1.default);
 app.use('/api/ttn', ttnRoutes_1.default);
 app.use('/api/ttn/webhook', ttnWebhookRoutes_1.default);
+app.use('/api/network-devices', networkDeviceRoutes_1.default);
 // ============================================================
 // ===== SERVER STARTUP =====
 // ============================================================
@@ -562,29 +587,70 @@ function startServer() {
         yield setupMqtt();
         // Store Socket.io instance in app for webhook routes
         app.set('io', io);
-        // Initialize TTN MQTT connection if credentials are configured
-        const ttnApiKey = process.env.TTN_API_KEY;
-        const ttnAppId = process.env.TTN_APPLICATION_ID;
-        const ttnRegion = process.env.TTN_REGION || 'eu1';
-        if (ttnApiKey && ttnAppId && ttnApiKey !== 'your-ttn-api-key-here') {
+        // Initialize TTN MQTT connections for all active apps with stored API keys
+        ttnMqttService_1.ttnMqttService.setSocketIO(io);
+        try {
+            const ttnApps = yield TTNApplication_1.TTNApplication.find({ isActive: true }).select('+apiKeyEncrypted');
+            const appsToConnect = ttnApps
+                .filter((app) => app.apiKeyEncrypted)
+                .map((app) => ({
+                region: app.ttnRegion,
+                applicationId: app.applicationId,
+                apiKey: app.getApiKey(),
+            }));
+            if (appsToConnect.length > 0) {
+                yield ttnMqttService_1.ttnMqttService.connectAll(appsToConnect);
+            }
+            else {
+                console.log('[TTN] No applications with stored API keys found');
+            }
+        }
+        catch (err) {
+            console.warn('[TTN] Error connecting MQTT on startup:', err);
+        }
+        // Periodic TTN sync every 5 minutes
+        setInterval(() => __awaiter(this, void 0, void 0, function* () {
             try {
-                ttnMqttService_1.ttnMqttService.setSocketIO(io);
-                yield ttnMqttService_1.ttnMqttService.connect({
-                    region: ttnRegion,
-                    applicationId: ttnAppId,
-                    apiKey: ttnApiKey,
-                });
-                console.log(`TTN MQTT connected for application: ${ttnAppId}`);
+                const apps = yield TTNApplication_1.TTNApplication.find({ isActive: true }).select('+apiKeyEncrypted');
+                for (const app of apps) {
+                    const apiKey = app.getApiKey();
+                    if (!apiKey)
+                        continue;
+                    try {
+                        ttnService_1.ttnService.initialize({
+                            region: app.ttnRegion,
+                            applicationId: app.applicationId,
+                            apiKey,
+                        });
+                        const ttnDevices = yield ttnService_1.ttnService.getDevices();
+                        for (const ttnDevice of ttnDevices) {
+                            yield TTNDevice_1.TTNDevice.findOneAndUpdate({ deviceId: ttnDevice.ids.device_id, applicationId: app.applicationId }, {
+                                $set: {
+                                    deviceId: ttnDevice.ids.device_id,
+                                    applicationId: app.applicationId,
+                                    owner: app.owner,
+                                    name: ttnDevice.name || ttnDevice.ids.device_id,
+                                    description: ttnDevice.description,
+                                    devEui: ttnDevice.ids.dev_eui,
+                                    joinEui: ttnDevice.ids.join_eui,
+                                    devAddr: ttnDevice.ids.dev_addr,
+                                    attributes: ttnDevice.attributes,
+                                },
+                            }, { upsert: true });
+                        }
+                        app.lastSync = new Date();
+                        yield app.save();
+                        console.log(`[TTN Sync] ${app.applicationId}: ${ttnDevices.length} devices synced`);
+                    }
+                    catch (syncErr) {
+                        console.warn(`[TTN Sync] Error syncing ${app.applicationId}:`, syncErr);
+                    }
+                }
             }
             catch (err) {
-                const errMsg = err instanceof Error ? err.message : String(err);
-                console.warn(`TTN MQTT connection failed: ${errMsg}`);
-                console.warn('TTN uplinks will not be received. Check your TTN_API_KEY and TTN_APPLICATION_ID.');
+                console.error('[TTN Sync] Periodic sync error:', err);
             }
-        }
-        else {
-            console.log('TTN MQTT not configured (set TTN_API_KEY and TTN_APPLICATION_ID in .env)');
-        }
+        }), 5 * 60 * 1000);
         // Start HTTP server
         httpServer.listen(config.port, '0.0.0.0', () => {
             console.log(`Server running on port ${config.port}`);

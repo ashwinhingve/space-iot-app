@@ -20,8 +20,8 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
-import { io, Socket } from 'socket.io-client';
-import { SOCKET_CONFIG } from '@/lib/config';
+import { Socket } from 'socket.io-client';
+import { createAuthenticatedSocket } from '@/lib/socket';
 
 // Sample Chart Implementation (can be replaced with actual Recharts implementation)
 const SimpleChart = ({ data = [25, 36, 43, 29, 40, 27, 33] }) => {
@@ -129,7 +129,7 @@ export const Dashboard: React.FC = () => {
   
   useEffect(() => {
     // Connect to socket server
-    socketRef.current = io(SOCKET_CONFIG.URL, SOCKET_CONFIG.OPTIONS);
+    socketRef.current = createAuthenticatedSocket();
     
     const socket = socketRef.current;
     

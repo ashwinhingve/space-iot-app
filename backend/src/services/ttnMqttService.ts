@@ -229,28 +229,37 @@ class TTNMqttService {
       const uplink = new TTNUplink(uplinkData);
       await uplink.save();
 
+      const existingDevice = await TTNDevice.findOne({ deviceId, applicationId })
+        .select('connectedSince')
+        .lean();
+
+      const deviceUpdate: Record<string, unknown> = {
+        isOnline: true,
+        lastSeen: uplinkData.receivedAt,
+        devAddr: endDeviceIds.dev_addr as string,
+        lastUplink: {
+          timestamp: uplinkData.receivedAt,
+          fPort: uplinkData.fPort,
+          fCnt: uplinkData.fCnt,
+          payload: uplinkData.rawPayload,
+          decodedPayload: uplinkData.decodedPayload,
+          rssi: uplinkData.rssi,
+          snr: uplinkData.snr,
+          spreadingFactor: uplinkData.spreadingFactor,
+          bandwidth: uplinkData.bandwidth,
+          frequency: uplinkData.frequency,
+          gatewayId: uplinkData.gatewayId,
+        },
+      };
+      if (!existingDevice?.connectedSince) {
+        deviceUpdate.connectedSince = uplinkData.receivedAt;
+      }
+
       // Update device
       await TTNDevice.findOneAndUpdate(
         { deviceId, applicationId },
         {
-          $set: {
-            isOnline: true,
-            lastSeen: uplinkData.receivedAt,
-            devAddr: endDeviceIds.dev_addr as string,
-            lastUplink: {
-              timestamp: uplinkData.receivedAt,
-              fPort: uplinkData.fPort,
-              fCnt: uplinkData.fCnt,
-              payload: uplinkData.rawPayload,
-              decodedPayload: uplinkData.decodedPayload,
-              rssi: uplinkData.rssi,
-              snr: uplinkData.snr,
-              spreadingFactor: uplinkData.spreadingFactor,
-              bandwidth: uplinkData.bandwidth,
-              frequency: uplinkData.frequency,
-              gatewayId: uplinkData.gatewayId,
-            },
-          },
+          $set: deviceUpdate,
           $inc: { 'metrics.totalUplinks': 1 },
         }
       );
@@ -349,9 +358,22 @@ class TTNMqttService {
 
     console.log(`[TTN MQTT] Device joined: ${deviceId}`);
 
+    const existingDevice = await TTNDevice.findOne({ deviceId, applicationId })
+      .select('connectedSince')
+      .lean();
+    const joinedAt = new Date();
+    const joinUpdate: Record<string, unknown> = {
+      isOnline: true,
+      lastSeen: joinedAt,
+      devAddr,
+    };
+    if (!existingDevice?.connectedSince) {
+      joinUpdate.connectedSince = joinedAt;
+    }
+
     await TTNDevice.findOneAndUpdate(
       { deviceId, applicationId },
-      { $set: { isOnline: true, lastSeen: new Date(), devAddr } }
+      { $set: joinUpdate }
     );
 
     if (this.io) {

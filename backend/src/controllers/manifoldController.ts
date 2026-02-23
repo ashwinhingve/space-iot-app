@@ -130,11 +130,53 @@ export const getManifolds = async (req: Request, res: Response): Promise<void> =
       .skip(skip)
       .limit(Number(limit));
 
+    const manifoldIds = manifolds.map((m) => m._id);
+    const valveGroups = await Valve.find({ manifoldId: { $in: manifoldIds } })
+      .select('manifoldId operationalData.currentStatus operationalData.mode operationalData.autoOffDurationSec alarms schedules')
+      .lean();
+
+    const summaryByManifold = new Map<string, {
+      onCount: number;
+      autoCount: number;
+      activeAlarms: number;
+      scheduleCount: number;
+      timerSec: number;
+    }>();
+
+    for (const valve of valveGroups) {
+      const key = valve.manifoldId.toString();
+      const existing = summaryByManifold.get(key) || {
+        onCount: 0,
+        autoCount: 0,
+        activeAlarms: 0,
+        scheduleCount: 0,
+        timerSec: 0
+      };
+      if (valve.operationalData?.currentStatus === 'ON') existing.onCount += 1;
+      if (valve.operationalData?.mode === 'AUTO') existing.autoCount += 1;
+      existing.activeAlarms += (valve.alarms || []).filter((a: any) => !a.acknowledged).length;
+      existing.scheduleCount += (valve.schedules || []).filter((s: any) => s.enabled).length;
+      existing.timerSec = Math.max(existing.timerSec, valve.operationalData?.autoOffDurationSec || 0);
+      summaryByManifold.set(key, existing);
+    }
+
     const total = await Manifold.countDocuments(query);
 
     res.json({
       success: true,
-      manifolds,
+      manifolds: manifolds.map((m) => {
+        const summary = summaryByManifold.get(m._id.toString()) || {
+          onCount: 0,
+          autoCount: 0,
+          activeAlarms: 0,
+          scheduleCount: 0,
+          timerSec: 0
+        };
+        return {
+          ...m.toJSON(),
+          controlSummary: summary
+        };
+      }),
       pagination: {
         page: Number(page),
         limit: Number(limit),

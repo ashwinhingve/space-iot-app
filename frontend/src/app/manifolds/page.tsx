@@ -21,6 +21,10 @@ import {
   Eye,
   Trash2,
   Sparkles,
+  AlarmSmoke,
+  Timer,
+  ToggleLeft,
+  Activity,
 } from 'lucide-react';
 
 type ManifoldType = {
@@ -40,6 +44,13 @@ type ManifoldType = {
     totalCycles: number;
   };
   esp32DeviceId: string | { status: string };
+  controlSummary?: {
+    onCount: number;
+    autoCount: number;
+    activeAlarms: number;
+    scheduleCount: number;
+    timerSec: number;
+  };
 };
 
 const statusConfig = {
@@ -264,7 +275,7 @@ export default function ManifoldsPage() {
                     </div>
 
                     {/* Stats */}
-                    <div className="relative grid grid-cols-2 gap-3 mb-6">
+                    <div className="relative grid grid-cols-2 gap-3 mb-4">
                       <div className="stats-badge bg-secondary/50 p-3 rounded-xl border border-border/50 group-hover:border-brand-500/20 transition-colors">
                         <p className="text-xs text-muted-foreground mb-1">Valves</p>
                         <p className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground group-hover:from-brand-600 group-hover:to-purple-600 transition-all">
@@ -276,6 +287,34 @@ export default function ManifoldsPage() {
                         <p className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground group-hover:from-brand-600 group-hover:to-purple-600 transition-all">
                           {manifold.metadata.totalCycles.toLocaleString()}
                         </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 mb-6">
+                      <div className="flex items-center gap-2 text-xs px-2.5 py-2 rounded-lg bg-secondary/40 border border-border/40">
+                        <ToggleLeft className="h-3.5 w-3.5 text-brand-500" />
+                        <span>
+                          Mode:{' '}
+                          {(manifold.controlSummary?.autoCount || 0) > 0 ? 'Auto' : 'Manual'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs px-2.5 py-2 rounded-lg bg-secondary/40 border border-border/40">
+                        <AlarmSmoke className={`h-3.5 w-3.5 ${(manifold.controlSummary?.activeAlarms || 0) > 0 ? 'text-red-500' : 'text-emerald-500'}`} />
+                        <span>
+                          Alarms: {manifold.controlSummary?.activeAlarms || 0}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs px-2.5 py-2 rounded-lg bg-secondary/40 border border-border/40">
+                        <Timer className="h-3.5 w-3.5 text-amber-500" />
+                        <span>
+                          Timer: {manifold.controlSummary?.timerSec || 0}s
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs px-2.5 py-2 rounded-lg bg-secondary/40 border border-border/40">
+                        <Activity className="h-3.5 w-3.5 text-emerald-500" />
+                        <span>
+                          ON: {manifold.controlSummary?.onCount || 0}/{manifold.specifications.valveCount}
+                        </span>
                       </div>
                     </div>
 

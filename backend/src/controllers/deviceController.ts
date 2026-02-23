@@ -128,6 +128,31 @@ export const controlDevice = async (req: Request, res: Response) => {
       }
     );
 
+    const nextStatus = Number(value) > 0 ? 'online' : device.status;
+    device.status = nextStatus;
+    device.lastSeen = new Date();
+    device.lastData = {
+      timestamp: new Date(),
+      value: Number(value) || 0
+    };
+    device.settings = {
+      ...device.settings,
+      value: Number(value) || 0
+    };
+    await device.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('deviceData', {
+        deviceId: device._id,
+        data: {
+          value: Number(value) || 0,
+          timestamp: new Date().toISOString()
+        }
+      });
+      io.emit('deviceStatus', { deviceId: device._id, status: device.status });
+    }
+
     res.json({ message: 'Control command sent successfully' });
   } catch (error) {
     res.status(500).json({ error: 'Error controlling device' });

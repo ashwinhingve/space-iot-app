@@ -18,6 +18,8 @@ interface Schedule {
   cronExpression: string;
   action: 'ON' | 'OFF';
   duration: number;
+  startAt?: string;
+  endAt?: string;
   createdBy: string;
   createdAt: string;
 }
@@ -46,12 +48,22 @@ interface Valve {
     };
     cycleCount: number;
     totalRuntime: number;
+    autoOffDurationSec: number;
   };
   position: {
     flowOrder: number;
     zone: string;
   };
   alarms: Alarm[];
+  alarmConfig?: {
+    enabled: boolean;
+    ruleType: 'THRESHOLD' | 'STATUS';
+    metric: 'pressure' | 'flow' | 'runtime' | 'status';
+    operator: '>' | '<' | '>=' | '<=' | '==' | '!=';
+    threshold?: number;
+    triggerStatus?: 'FAULT' | 'OFF';
+    notify: boolean;
+  };
   schedules: Schedule[];
   createdAt: string;
   updatedAt: string;
@@ -313,12 +325,16 @@ export const createSchedule = createAsyncThunk(
       action,
       duration,
       enabled,
+      startAt,
+      endAt,
     }: {
       valveId: string;
       cronExpression: string;
       action: 'ON' | 'OFF';
       duration?: number;
       enabled?: boolean;
+      startAt?: string;
+      endAt?: string;
     },
     { getState }
   ) => {
@@ -329,7 +345,7 @@ export const createSchedule = createAsyncThunk(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${getToken(state)}`,
       },
-      body: JSON.stringify({ cronExpression, action, duration, enabled }),
+      body: JSON.stringify({ cronExpression, action, duration, enabled, startAt, endAt }),
     });
 
     if (!response.ok) {
@@ -337,6 +353,63 @@ export const createSchedule = createAsyncThunk(
     }
 
     return { valveId, ...(await response.json()) };
+  }
+);
+
+export const updateSchedule = createAsyncThunk(
+  'manifolds/updateSchedule',
+  async (
+    {
+      valveId,
+      scheduleId,
+      data,
+    }: {
+      valveId: string;
+      scheduleId: string;
+      data: Partial<Schedule>;
+    },
+    { getState }
+  ) => {
+    const state = getState() as { auth: { token: string } };
+    const response = await fetch(API_ENDPOINTS.VALVE_SCHEDULE_DETAIL(valveId, scheduleId), {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getToken(state)}`,
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Failed to update schedule' }));
+      throw new Error(error.message || 'Failed to update schedule');
+    }
+
+    const payload = await response.json();
+    return { valveId, scheduleId, schedule: payload.schedule };
+  }
+);
+
+export const deleteSchedule = createAsyncThunk(
+  'manifolds/deleteSchedule',
+  async (
+    { valveId, scheduleId }: { valveId: string; scheduleId: string },
+    { getState }
+  ) => {
+    const state = getState() as { auth: { token: string } };
+    const response = await fetch(API_ENDPOINTS.VALVE_SCHEDULE_DETAIL(valveId, scheduleId), {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${getToken(state)}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Failed to delete schedule' }));
+      throw new Error(error.message || 'Failed to delete schedule');
+    }
+
+    return { valveId, scheduleId };
   }
 );
 
@@ -362,6 +435,96 @@ export const acknowledgeAlarm = createAsyncThunk(
   }
 );
 
+export const updateValveMode = createAsyncThunk(
+  'manifolds/updateValveMode',
+  async (
+    { valveId, mode }: { valveId: string; mode: 'AUTO' | 'MANUAL' },
+    { getState }
+  ) => {
+    const state = getState() as { auth: { token: string } };
+    const response = await fetch(`${API_ENDPOINTS.VALVE_DETAIL(valveId)}/mode`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getToken(state)}`,
+      },
+      body: JSON.stringify({ mode }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Failed to update valve mode' }));
+      throw new Error(error.message || 'Failed to update valve mode');
+    }
+
+    return { valveId, mode };
+  }
+);
+
+export const updateValveAlarmConfig = createAsyncThunk(
+  'manifolds/updateValveAlarmConfig',
+  async (
+    {
+      valveId,
+      alarmConfig,
+    }: {
+      valveId: string;
+      alarmConfig: {
+        enabled: boolean;
+        ruleType: 'THRESHOLD' | 'STATUS';
+        metric: 'pressure' | 'flow' | 'runtime' | 'status';
+        operator: '>' | '<' | '>=' | '<=' | '==' | '!=';
+        threshold?: number;
+        triggerStatus?: 'FAULT' | 'OFF';
+        notify: boolean;
+      };
+    },
+    { getState }
+  ) => {
+    const state = getState() as { auth: { token: string } };
+    const response = await fetch(`${API_ENDPOINTS.VALVE_DETAIL(valveId)}/alarm-config`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getToken(state)}`,
+      },
+      body: JSON.stringify(alarmConfig),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Failed to update valve alarm config' }));
+      throw new Error(error.message || 'Failed to update valve alarm config');
+    }
+
+    const data = await response.json();
+    return { valveId, alarmConfig: data.alarmConfig || alarmConfig };
+  }
+);
+
+export const updateValveTimer = createAsyncThunk(
+  'manifolds/updateValveTimer',
+  async (
+    { valveId, autoOffDurationSec }: { valveId: string; autoOffDurationSec: number },
+    { getState }
+  ) => {
+    const state = getState() as { auth: { token: string } };
+    const response = await fetch(`${API_ENDPOINTS.VALVE_DETAIL(valveId)}/timer`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getToken(state)}`,
+      },
+      body: JSON.stringify({ autoOffDurationSec }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Failed to update valve timer' }));
+      throw new Error(error.message || 'Failed to update valve timer');
+    }
+
+    return { valveId, autoOffDurationSec };
+  }
+);
+
 const manifoldSlice = createSlice({
   name: 'manifolds',
   initialState,
@@ -371,11 +534,16 @@ const manifoldSlice = createSlice({
     },
     updateValveStatus: (state, action) => {
       const { manifoldId, valves: valveUpdates } = action.payload;
+      const manifoldKey =
+        Object.keys(state.valves).find((key) => {
+          const manifold = state.manifolds.find((m) => m._id === key);
+          return manifold?.manifoldId === manifoldId;
+        }) || manifoldId;
 
       // Update valves in state
-      if (state.valves[manifoldId]) {
+      if (state.valves[manifoldKey]) {
         valveUpdates.forEach((update: { valveNumber: number; status: 'ON' | 'OFF' | 'FAULT' }) => {
-          const valve = state.valves[manifoldId].find(
+          const valve = state.valves[manifoldKey].find(
             (v) => v.valveNumber === update.valveNumber
           );
           if (valve) {
@@ -535,6 +703,25 @@ const manifoldSlice = createSlice({
           }
         });
       })
+      .addCase(updateSchedule.fulfilled, (state, action) => {
+        const { valveId, scheduleId, schedule } = action.payload;
+        Object.values(state.valves).forEach((valveList) => {
+          const valve = valveList.find((v) => v._id === valveId);
+          if (!valve) return;
+          const idx = valve.schedules.findIndex((s) => s.scheduleId === scheduleId);
+          if (idx !== -1 && schedule) {
+            valve.schedules[idx] = schedule;
+          }
+        });
+      })
+      .addCase(deleteSchedule.fulfilled, (state, action) => {
+        const { valveId, scheduleId } = action.payload;
+        Object.values(state.valves).forEach((valveList) => {
+          const valve = valveList.find((v) => v._id === valveId);
+          if (!valve) return;
+          valve.schedules = valve.schedules.filter((s) => s.scheduleId !== scheduleId);
+        });
+      })
 
       // Acknowledge Alarm
       .addCase(acknowledgeAlarm.fulfilled, (state, action) => {
@@ -549,6 +736,36 @@ const manifoldSlice = createSlice({
               alarm.acknowledged = true;
               alarm.acknowledgedAt = new Date().toISOString();
             }
+          }
+        });
+      })
+      // Update valve mode
+      .addCase(updateValveMode.fulfilled, (state, action) => {
+        const { valveId, mode } = action.payload;
+        Object.values(state.valves).forEach((valveList) => {
+          const valve = valveList.find((v) => v._id === valveId);
+          if (valve) {
+            valve.operationalData.mode = mode;
+          }
+        });
+      })
+      // Update valve alarm config
+      .addCase(updateValveAlarmConfig.fulfilled, (state, action) => {
+        const { valveId, alarmConfig } = action.payload;
+        Object.values(state.valves).forEach((valveList) => {
+          const valve = valveList.find((v) => v._id === valveId);
+          if (valve) {
+            valve.alarmConfig = alarmConfig;
+          }
+        });
+      })
+      // Update valve timer
+      .addCase(updateValveTimer.fulfilled, (state, action) => {
+        const { valveId, autoOffDurationSec } = action.payload;
+        Object.values(state.valves).forEach((valveList) => {
+          const valve = valveList.find((v) => v._id === valveId);
+          if (valve) {
+            valve.operationalData.autoOffDurationSec = autoOffDurationSec;
           }
         });
       });
