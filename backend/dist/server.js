@@ -66,6 +66,7 @@ const ttnRoutes_1 = __importDefault(require("./routes/ttnRoutes"));
 const ttnWebhookRoutes_1 = __importDefault(require("./routes/ttnWebhookRoutes"));
 const networkDeviceRoutes_1 = __importDefault(require("./routes/networkDeviceRoutes"));
 const Device_1 = require("./models/Device");
+const NetworkDevice_1 = require("./models/NetworkDevice");
 const Manifold_1 = require("./models/Manifold");
 const Valve_1 = require("./models/Valve");
 const ValveCommand_1 = require("./models/ValveCommand");
@@ -196,11 +197,58 @@ const handleMqttMessage = (topic, message) => __awaiter(void 0, void 0, void 0, 
                             deviceId: updatedDevice._id,
                             data: { temperature, humidity, value, timestamp: new Date() }
                         });
+                        // Also update linked NetworkDevice (Wi-Fi) and emit to room
+                        try {
+                            const netDev = yield NetworkDevice_1.NetworkDevice.findOneAndUpdate({ protocol: 'wifi', mqttDeviceId: deviceId }, { status: 'online', lastSeen: new Date() }, { new: true });
+                            if (netDev) {
+                                io.to(`netdev-${netDev._id}`).emit('networkDeviceData', {
+                                    deviceId: netDev._id,
+                                    data: {
+                                        temperature,
+                                        humidity,
+                                        rssi: data.rssi,
+                                        ledState: data.ledState,
+                                        pinsActive: data.pinsActive,
+                                        timestamp: new Date()
+                                    }
+                                });
+                            }
+                        }
+                        catch (netErr) {
+                            console.error('Error updating linked NetworkDevice:', netErr);
+                        }
                     }
                 }
                 catch (err) {
                     console.error('Error parsing device data:', err);
                 }
+            }
+        }
+        else if (prefix === 'gsm') {
+            try {
+                const netDev = yield NetworkDevice_1.NetworkDevice.findOneAndUpdate({ protocol: 'gsm', mqttDeviceId: deviceId }, { status: type === 'online' ? (message.toString() === 'true' ? 'online' : 'offline') : 'online', lastSeen: new Date() }, { new: true });
+                if (!netDev) {
+                    console.log(`No GSM NetworkDevice found for mqttDeviceId: ${deviceId}`);
+                }
+                else if (type === 'data') {
+                    const d = JSON.parse(message.toString());
+                    if (d.signal !== undefined) {
+                        netDev.signalStrength = d.signal;
+                        yield netDev.save();
+                    }
+                    io.to(`netdev-${netDev._id}`).emit('networkDeviceData', { deviceId: netDev._id, data: d });
+                }
+                else if (type === 'location') {
+                    const loc = JSON.parse(message.toString());
+                    yield NetworkDevice_1.NetworkDevice.findByIdAndUpdate(netDev._id, { 'gsm.location': loc });
+                    io.to(`netdev-${netDev._id}`).emit('networkDeviceLocation', { deviceId: netDev._id, location: loc });
+                }
+                else if (type === 'online') {
+                    io.to(`netdev-${netDev._id}`).emit('networkDeviceStatus', { deviceId: netDev._id, status: netDev.status });
+                }
+            }
+            catch (gsmErr) {
+                console.error('Error processing GSM MQTT message:', gsmErr);
             }
         }
         else if (prefix === 'manifolds') {
@@ -284,6 +332,9 @@ function setupMqtt() {
             yield awsIotService_1.awsIotService.subscribe('manifolds/+/status');
             yield awsIotService_1.awsIotService.subscribe('manifolds/+/online');
             yield awsIotService_1.awsIotService.subscribe('manifolds/+/ack');
+            yield awsIotService_1.awsIotService.subscribe('gsm/+/data');
+            yield awsIotService_1.awsIotService.subscribe('gsm/+/online');
+            yield awsIotService_1.awsIotService.subscribe('gsm/+/location');
             app.set('mqttClient', {
                 publish: (topic, message, options, callback) => {
                     awsIotService_1.awsIotService.publish(topic, message, (options === null || options === void 0 ? void 0 : options.qos) || 1)
@@ -313,7 +364,10 @@ function setupMqtt() {
                     'devices/+/online',
                     'manifolds/+/status',
                     'manifolds/+/online',
-                    'manifolds/+/ack'
+                    'manifolds/+/ack',
+                    'gsm/+/data',
+                    'gsm/+/online',
+                    'gsm/+/location'
                 ];
                 cloudMqttClient.subscribe(topics, { qos: 1 }, (err) => {
                     if (err) {
@@ -325,7 +379,7 @@ function setupMqtt() {
                 });
             });
             cloudMqttClient.on('message', (topic, message) => __awaiter(this, void 0, void 0, function* () {
-                if (topic.startsWith('devices/') || topic.startsWith('manifolds/')) {
+                if (topic.startsWith('devices/') || topic.startsWith('manifolds/') || topic.startsWith('gsm/')) {
                     try {
                         yield handleMqttMessage(topic, message);
                     }
@@ -369,7 +423,7 @@ function setupMqtt() {
                 if (client) {
                     console.log(`MQTT Publish from ${client.id}: ${topic}`);
                 }
-                if (topic.startsWith('devices/') || topic.startsWith('manifolds/')) {
+                if (topic.startsWith('devices/') || topic.startsWith('manifolds/') || topic.startsWith('gsm/')) {
                     try {
                         yield handleMqttMessage(topic, packet.payload);
                     }
@@ -444,6 +498,12 @@ io.on('connection', (socket) => {
     console.log('A user connected');
     socket.on('joinDevice', (deviceId) => {
         socket.join(deviceId);
+    });
+    socket.on('joinNetworkDevice', (id) => {
+        socket.join(`netdev-${id}`);
+    });
+    socket.on('leaveNetworkDevice', (id) => {
+        socket.leave(`netdev-${id}`);
     });
     socket.on('requestDeviceStatus', (deviceId) => __awaiter(void 0, void 0, void 0, function* () {
         try {

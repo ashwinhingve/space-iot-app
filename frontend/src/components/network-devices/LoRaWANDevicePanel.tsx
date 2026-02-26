@@ -131,6 +131,7 @@ export function LoRaWANDevicePanel({ device, applicationId, manifolds, onClose, 
       .then((d) => setUplinks(d.uplinks || []))
       .catch(() => setUplinks([]))
       .finally(() => setUplinkLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [device?._id, applicationId]);
 
   const isOpen = !!device;

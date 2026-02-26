@@ -44,7 +44,6 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock3,
-  Droplet,
   Edit3,
   Gauge,
   History,

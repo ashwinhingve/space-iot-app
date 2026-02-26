@@ -218,8 +218,6 @@ export default function ReportsPage() {
     exportCSV('rssi-report', headers, rows);
   }, [activeUplinks]);
 
-  const activeTabConfig = REPORT_TABS.find((t) => t.id === activeTab)!;
-
   return (
     <MainLayout>
       <div className="relative min-h-screen">
