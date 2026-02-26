@@ -22,6 +22,7 @@ import {
   addActivity,
   acknowledgeAlert,
 } from '@/store/slices/dashboardSlice';
+import { fetchTTNApplications } from '@/store/slices/ttnSlice';
 import { createAuthenticatedSocket } from '@/lib/socket';
 import {
   Wifi,
@@ -41,6 +42,9 @@ import {
   HeartPulse,
   Eye,
   Sparkles,
+  Radio,
+  Cpu,
+  Signal,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -56,45 +60,27 @@ const REPORT_SUBITEMS = [
 const PROJECT_SUBSYSTEMS = [
   {
     title: 'Pump House SCADA',
-    description: 'Real-time monitoring and control of pump house systems',
+    description: 'Real-time valve monitoring & control',
     href: '/scada',
     icon: Monitor,
     color: 'from-blue-500/20 to-blue-600/10',
     borderColor: 'border-blue-500/30',
     iconColor: 'text-blue-400',
     iconBg: 'bg-blue-500/20',
-  },
-  {
-    title: 'Command Area Map System',
-    description: 'Geographic visualization of command area infrastructure',
-    href: '/command-area-map',
-    icon: Map,
-    color: 'from-emerald-500/20 to-emerald-600/10',
-    borderColor: 'border-emerald-500/30',
-    iconColor: 'text-emerald-400',
-    iconBg: 'bg-emerald-500/20',
-  },
-  {
-    title: 'Pump House SLD',
-    description: 'Single Line Diagram for electrical systems',
-    href: '/sld',
-    icon: Zap,
-    color: 'from-amber-500/20 to-amber-600/10',
-    borderColor: 'border-amber-500/30',
-    iconColor: 'text-amber-400',
-    iconBg: 'bg-amber-500/20',
+    subBadge: { label: 'SLD', icon: Zap, color: 'text-amber-400' },
   },
   {
     title: 'OMS Dashboard',
-    description: 'Operations Management System for maintenance',
+    description: 'Operations management & geographic mapping',
     href: '/oms',
     icon: BarChart3,
     color: 'from-purple-500/20 to-purple-600/10',
     borderColor: 'border-purple-500/30',
     iconColor: 'text-purple-400',
     iconBg: 'bg-purple-500/20',
+    subBadge: { label: 'Map', icon: Map, color: 'text-emerald-400' },
   },
-];
+] as const;
 
 type DateRange = '7d' | '30d' | '90d';
 
@@ -153,6 +139,9 @@ export default function DashboardPage() {
   const { stats, analytics, systemHealth, alerts, recentActivity } = useSelector(
     (state: RootState) => state.dashboard
   );
+  const { applications: ttnApplications, devices: ttnDevices, loading: ttnLoading } = useSelector(
+    (state: RootState) => state.ttn
+  );
 
   // ─── Data fetching ─────────────────────────────────────────
   const fetchAllData = useCallback(async () => {
@@ -162,6 +151,7 @@ export default function DashboardPage() {
       dispatch(fetchDashboardStats()),
       dispatch(fetchAnalytics()),
       dispatch(fetchAlerts()),
+      dispatch(fetchTTNApplications()),
     ]);
     setIsRefreshing(false);
   }, [dispatch]);
@@ -199,18 +189,14 @@ export default function DashboardPage() {
       dispatch(fetchDashboardStats());
     });
 
-    const healthInterval = setInterval(() => {
-      dispatch(updateSystemHealth({
-        cpu: Math.floor(Math.random() * 30) + 20,
-        memory: Math.floor(Math.random() * 20) + 40,
-        uptime: Math.floor((Date.now() - new Date().setHours(0, 0, 0, 0)) / 1000),
-        lastUpdated: new Date().toISOString(),
-      }));
-    }, 5000);
+    // Set stable system health on mount (no random simulation)
+    dispatch(updateSystemHealth({
+      uptime: Math.floor((Date.now() - new Date().setHours(0, 0, 0, 0)) / 1000),
+      lastUpdated: new Date().toISOString(),
+    }));
 
     return () => {
       newSocket.disconnect();
-      clearInterval(healthInterval);
     };
   }, [dispatch]);
 
@@ -243,6 +229,10 @@ export default function DashboardPage() {
       return next;
     });
   };
+
+  // ─── TTN / LoRaWAN computed metrics ────────────────────────
+  const ttnOnlineDevices = ttnDevices.filter((d) => d.isOnline).length;
+  const ttnTotalUplinks = ttnDevices.reduce((sum, d) => sum + (d.metrics?.totalUplinks ?? 0), 0);
 
   // ─── Device stats ──────────────────────────────────────────
   const totalDevices = stats.devicesOnline + stats.devicesOffline;
@@ -610,7 +600,156 @@ export default function DashboardPage() {
           </motion.div>
 
           {/* ══════════════════════════════════════════════════
-              4. PROJECT OVERVIEW TOGGLE BANNER
+              4. TTN / LoRaWAN OVERVIEW — Lightweight summary
+              ══════════════════════════════════════════════════ */}
+          <motion.div
+            className="mb-8"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.35, duration: 0.5 }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Radio className="h-5 w-5 text-violet-400" />
+                <h2 className="text-lg font-semibold text-foreground">LoRaWAN Overview</h2>
+                <span className="text-xs text-muted-foreground ml-1">— LoRa network summary</span>
+              </div>
+              <Link
+                href="/devices"
+                className="flex items-center gap-1 text-xs font-medium text-violet-400 hover:text-violet-300 transition-colors"
+              >
+                View LoRaWAN Devices
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {/* Total Applications */}
+              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                <Link href="/devices">
+                  <div className="relative overflow-hidden rounded-2xl p-4 bg-gradient-to-br from-violet-500/15 to-violet-600/5 border border-violet-500/25 backdrop-blur-xl hover:shadow-lg hover:shadow-violet-500/10 hover:border-violet-500/40 transition-all duration-300 cursor-pointer group">
+                    <div className="absolute -top-8 -right-8 w-20 h-20 bg-gradient-to-br from-white/5 to-transparent rounded-full blur-xl" />
+                    <div className="relative z-10">
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <div className="p-1.5 rounded-lg bg-violet-500/20">
+                          <BarChart3 className="h-3.5 w-3.5 text-violet-400" />
+                        </div>
+                        <span className="text-xs text-muted-foreground font-medium">Applications</span>
+                        <ExternalLink className="h-3 w-3 text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      {ttnLoading && ttnApplications.length === 0 ? (
+                        <div className="h-8 w-12 bg-violet-500/10 rounded animate-pulse" />
+                      ) : (
+                        <motion.p
+                          className="text-2xl font-bold text-violet-400"
+                          initial={{ opacity: 0, scale: 0.5 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ duration: 0.4, delay: 0.45 }}
+                        >
+                          {ttnApplications.length}
+                        </motion.p>
+                      )}
+                      <p className="text-[11px] text-muted-foreground mt-1">TTN configured</p>
+                    </div>
+                  </div>
+                </Link>
+              </motion.div>
+
+              {/* Total LoRaWAN Devices */}
+              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                <Link href="/devices">
+                  <div className="relative overflow-hidden rounded-2xl p-4 bg-gradient-to-br from-purple-500/15 to-purple-600/5 border border-purple-500/25 backdrop-blur-xl hover:shadow-lg hover:shadow-purple-500/10 hover:border-purple-500/40 transition-all duration-300 cursor-pointer group">
+                    <div className="absolute -top-8 -right-8 w-20 h-20 bg-gradient-to-br from-white/5 to-transparent rounded-full blur-xl" />
+                    <div className="relative z-10">
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <div className="p-1.5 rounded-lg bg-purple-500/20">
+                          <Cpu className="h-3.5 w-3.5 text-purple-400" />
+                        </div>
+                        <span className="text-xs text-muted-foreground font-medium">LoRa Devices</span>
+                        <ExternalLink className="h-3 w-3 text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      <motion.p
+                        className="text-2xl font-bold text-purple-400"
+                        initial={{ opacity: 0, scale: 0.5 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ duration: 0.4, delay: 0.5 }}
+                      >
+                        {ttnDevices.length > 0 ? ttnDevices.length : '—'}
+                      </motion.p>
+                      <p className="text-[11px] text-muted-foreground mt-1">Synced from TTN</p>
+                    </div>
+                  </div>
+                </Link>
+              </motion.div>
+
+              {/* Online Devices */}
+              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                <Link href="/devices">
+                  <div className="relative overflow-hidden rounded-2xl p-4 bg-gradient-to-br from-emerald-500/15 to-emerald-600/5 border border-emerald-500/25 backdrop-blur-xl hover:shadow-lg hover:shadow-emerald-500/10 hover:border-emerald-500/40 transition-all duration-300 cursor-pointer group">
+                    <div className="absolute -top-8 -right-8 w-20 h-20 bg-gradient-to-br from-white/5 to-transparent rounded-full blur-xl" />
+                    <div className="relative z-10">
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <div className="p-1.5 rounded-lg bg-emerald-500/20">
+                          <Signal className="h-3.5 w-3.5 text-emerald-400" />
+                        </div>
+                        <span className="text-xs text-muted-foreground font-medium">Online Now</span>
+                        {ttnOnlineDevices > 0 && (
+                          <span className="ml-auto flex h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                        )}
+                      </div>
+                      <motion.p
+                        className="text-2xl font-bold text-emerald-400"
+                        initial={{ opacity: 0, scale: 0.5 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ duration: 0.4, delay: 0.55 }}
+                      >
+                        {ttnDevices.length > 0 ? ttnOnlineDevices : '—'}
+                      </motion.p>
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        {ttnDevices.length > 0
+                          ? `of ${ttnDevices.length} reporting`
+                          : 'Load devices page'}
+                      </p>
+                    </div>
+                  </div>
+                </Link>
+              </motion.div>
+
+              {/* Total Uplinks */}
+              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                <Link href="/devices">
+                  <div className="relative overflow-hidden rounded-2xl p-4 bg-gradient-to-br from-cyan-500/15 to-cyan-600/5 border border-cyan-500/25 backdrop-blur-xl hover:shadow-lg hover:shadow-cyan-500/10 hover:border-cyan-500/40 transition-all duration-300 cursor-pointer group">
+                    <div className="absolute -top-8 -right-8 w-20 h-20 bg-gradient-to-br from-white/5 to-transparent rounded-full blur-xl" />
+                    <div className="relative z-10">
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <div className="p-1.5 rounded-lg bg-cyan-500/20">
+                          <Zap className="h-3.5 w-3.5 text-cyan-400" />
+                        </div>
+                        <span className="text-xs text-muted-foreground font-medium">Total Uplinks</span>
+                        <ExternalLink className="h-3 w-3 text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                      <motion.p
+                        className="text-2xl font-bold text-cyan-400"
+                        initial={{ opacity: 0, scale: 0.5 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ duration: 0.4, delay: 0.6 }}
+                      >
+                        {ttnTotalUplinks > 0
+                          ? ttnTotalUplinks >= 1000
+                            ? `${(ttnTotalUplinks / 1000).toFixed(1)}k`
+                            : ttnTotalUplinks
+                          : '—'}
+                      </motion.p>
+                      <p className="text-[11px] text-muted-foreground mt-1">All time messages</p>
+                    </div>
+                  </div>
+                </Link>
+              </motion.div>
+            </div>
+          </motion.div>
+
+          {/* ══════════════════════════════════════════════════
+              5. PROJECT OVERVIEW TOGGLE BANNER
               Appears only after clicking
               ══════════════════════════════════════════════════ */}
           <motion.div
@@ -654,7 +793,7 @@ export default function DashboardPage() {
           </motion.div>
 
           {/* ══════════════════════════════════════════════════
-              5. PROJECT OVERVIEW — Shown only when toggled
+              6. PROJECT OVERVIEW — Shown only when toggled
               SCADA, Map, SLD, OMS, Reports
               ══════════════════════════════════════════════════ */}
           <AnimatePresence>
@@ -671,8 +810,8 @@ export default function DashboardPage() {
                   <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
                     Project Overview
                   </h2>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
-                    {/* SCADA, Map, SLD, OMS cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {/* SCADA + OMS cards */}
                     {PROJECT_SUBSYSTEMS.map((subsystem, index) => (
                       <motion.div
                         key={subsystem.href}
@@ -699,6 +838,12 @@ export default function DashboardPage() {
                               <p className="text-xs text-muted-foreground leading-relaxed">{subsystem.description}</p>
                               <ChevronRight className="h-3.5 w-3.5 text-muted-foreground mt-2 opacity-0 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
                             </div>
+                            {'subBadge' in subsystem && subsystem.subBadge && (
+                              <span className={`absolute bottom-3 right-3 flex items-center gap-1 text-[10px] font-semibold ${subsystem.subBadge.color} opacity-70`}>
+                                <subsystem.subBadge.icon className="h-3 w-3" />
+                                {subsystem.subBadge.label}
+                              </span>
+                            )}
                           </div>
                         </Link>
                       </motion.div>
@@ -737,7 +882,7 @@ export default function DashboardPage() {
           </AnimatePresence>
 
           {/* ══════════════════════════════════════════════════
-              6. MAIN CONTENT — Charts + System Health + Alerts
+              7. MAIN CONTENT — Charts + System Health + Alerts
               ══════════════════════════════════════════════════ */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             {/* Left Column - Device Activity Chart */}
@@ -777,7 +922,7 @@ export default function DashboardPage() {
           </div>
 
           {/* ══════════════════════════════════════════════════
-              7. RECENT ACTIVITY
+              8. RECENT ACTIVITY
               ══════════════════════════════════════════════════ */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}

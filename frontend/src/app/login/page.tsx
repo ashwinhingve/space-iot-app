@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { login, clearError } from '@/store/slices/authSlice';
 import { Button } from '@/components/ui/button';
@@ -12,12 +12,14 @@ import { motion } from 'framer-motion';
 import AnimatedBackground from '@/components/AnimatedBackground';
 import { ArrowRight, Lock, Mail, AlertCircle, Sparkles, Zap } from 'lucide-react';
 
-export default function LoginPage() {
+function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const dispatch = useDispatch<AppDispatch>();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTo = searchParams.get('redirect') || '/dashboard';
   const { loading, error, isAuthenticated } = useSelector((state: RootState) => state.auth);
 
   useEffect(() => {
@@ -26,9 +28,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      router.push('/dashboard');
+      router.push(redirectTo);
     }
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, router, redirectTo]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,7 +38,7 @@ export default function LoginPage() {
 
     try {
       await dispatch(login({ email, password })).unwrap();
-      router.push('/dashboard');
+      router.push(redirectTo);
     } catch (error) {
       console.error('Login failed:', error);
     }
@@ -117,19 +119,14 @@ export default function LoginPage() {
             <div className="relative">
               {/* Google Sign-In Button */}
               <div className="mb-6">
-                <GoogleAuthButton onError={(err) => console.error(err)} />
+                <GoogleAuthButton redirectTo={redirectTo} onError={(err) => console.error(err)} />
               </div>
 
               {/* Divider */}
-              <div className="relative my-6">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-border/50"></div>
-                </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-4 bg-card/80 text-muted-foreground backdrop-blur-sm">
-                    Or continue with email
-                  </span>
-                </div>
+              <div className="flex items-center gap-3 my-6">
+                <div className="flex-1 border-t border-border/50" />
+                <span className="text-xs text-muted-foreground whitespace-nowrap">Or continue with email</span>
+                <div className="flex-1 border-t border-border/50" />
               </div>
 
               {/* Email/Password Login Form */}
@@ -268,5 +265,13 @@ export default function LoginPage() {
         </motion.div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }

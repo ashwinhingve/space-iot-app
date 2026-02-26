@@ -15,8 +15,6 @@ import { motion, AnimatePresence, useMotionValue, useTransform, useSpring } from
 const navLinks = [
   { name: 'Dashboard', href: '/dashboard' },
   { name: 'Devices', href: '/devices' },
-  { name: 'Manifolds', href: '/manifolds' },
-  { name: 'TTN', href: '/ttn' },
   { name: 'Documentation', href: '/documentation' },
 ]
 

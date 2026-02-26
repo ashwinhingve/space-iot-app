@@ -1,4 +1,4 @@
-import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import { API_ENDPOINTS } from '@/lib/config';
 
 // Interfaces
@@ -10,6 +10,8 @@ interface Alarm {
   acknowledged: boolean;
   acknowledgedBy?: string;
   acknowledgedAt?: string;
+  resolved?: boolean;
+  resolvedAt?: string;
 }
 
 interface Schedule {
@@ -42,7 +44,7 @@ interface Valve {
     currentStatus: 'ON' | 'OFF' | 'FAULT';
     mode: 'AUTO' | 'MANUAL';
     lastCommand?: {
-      action: 'ON' | 'OFF';
+      action: 'ON' | 'OFF' | 'PULSE';
       timestamp: string;
       issuedBy: string;
     };
@@ -62,6 +64,7 @@ interface Valve {
     operator: '>' | '<' | '>=' | '<=' | '==' | '!=';
     threshold?: number;
     triggerStatus?: 'FAULT' | 'OFF';
+    severity?: 'INFO' | 'WARNING' | 'CRITICAL';
     notify: boolean;
   };
   schedules: Schedule[];
@@ -145,11 +148,25 @@ interface Manifold {
   updatedAt: string;
 }
 
+// LoRaWAN device uplink sensor data
+export interface DeviceSensorData {
+  deviceId: string;       // matches manifold's esp32DeviceId (_id or string)
+  receivedAt: string;     // ISO timestamp of uplink arrival
+  pt1: number | null;     // Pressure Transducer 1 reading (converted to PSI)
+  pt2: number | null;     // Pressure Transducer 2 reading (converted to PSI)
+  battery: number | null; // Battery % or voltage (0–100 or V)
+  solar: number | null;   // Solar input reading
+  tamper: boolean;        // Tamper switch state
+  rssi?: number | null;   // LoRa RSSI (dBm)
+  snr?: number | null;    // LoRa SNR (dB)
+}
+
 interface ManifoldState {
   manifolds: Manifold[];
   selectedManifold: Manifold | null;
   valves: { [manifoldId: string]: Valve[] };
   components: { [manifoldId: string]: Component[] };
+  sensorData: { [deviceId: string]: DeviceSensorData };
   loading: boolean;
   error: string | null;
 }
@@ -159,6 +176,7 @@ const initialState: ManifoldState = {
   selectedManifold: null,
   valves: {},
   components: {},
+  sensorData: {},
   loading: false,
   error: null,
 };
@@ -294,7 +312,7 @@ export const deleteManifold = createAsyncThunk(
 export const sendValveCommand = createAsyncThunk(
   'manifolds/sendValveCommand',
   async (
-    { valveId, action, duration }: { valveId: string; action: 'ON' | 'OFF'; duration?: number },
+    { valveId, action }: { valveId: string; action: 'ON' | 'OFF' | 'PULSE' },
     { getState }
   ) => {
     const state = getState() as { auth: { token: string } };
@@ -304,7 +322,7 @@ export const sendValveCommand = createAsyncThunk(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${getToken(state)}`,
       },
-      body: JSON.stringify({ action, duration }),
+      body: JSON.stringify({ action }),
     });
 
     if (!response.ok) {
@@ -475,6 +493,7 @@ export const updateValveAlarmConfig = createAsyncThunk(
         operator: '>' | '<' | '>=' | '<=' | '==' | '!=';
         threshold?: number;
         triggerStatus?: 'FAULT' | 'OFF';
+        severity?: 'INFO' | 'WARNING' | 'CRITICAL';
         notify: boolean;
       };
     },
@@ -522,6 +541,52 @@ export const updateValveTimer = createAsyncThunk(
     }
 
     return { valveId, autoOffDurationSec };
+  }
+);
+
+export const resolveAlarm = createAsyncThunk(
+  'manifolds/resolveAlarm',
+  async (
+    { valveId, alarmId }: { valveId: string; alarmId: string },
+    { getState }
+  ) => {
+    const state = getState() as { auth: { token: string } };
+    // Best-effort call — backend may not support this endpoint yet
+    try {
+      await fetch(API_ENDPOINTS.VALVE_ALARM_RESOLVE(valveId, alarmId), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken(state)}` },
+      });
+    } catch {
+      // Optimistic UI update regardless
+    }
+    return { valveId, alarmId };
+  }
+);
+
+export const updateValve = createAsyncThunk(
+  'manifolds/updateValve',
+  async (
+    { valveId, data }: { valveId: string; data: Record<string, unknown> },
+    { getState }
+  ) => {
+    const state = getState() as { auth: { token: string } };
+    const response = await fetch(API_ENDPOINTS.VALVE_DETAIL(valveId), {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getToken(state)}`,
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Failed to update valve' }));
+      throw new Error(error.message || 'Failed to update valve');
+    }
+
+    const result = await response.json();
+    return { valveId, valve: result.valve || result };
   }
 );
 
@@ -578,6 +643,9 @@ const manifoldSlice = createSlice({
       const { commandId, manifoldId } = action.payload;
       // Could track command acknowledgments if needed
       console.log(`Command ${commandId} acknowledged for manifold ${manifoldId}`);
+    },
+    updateDeviceSensorData: (state, action: PayloadAction<DeviceSensorData>) => {
+      state.sensorData[action.payload.deviceId] = action.payload;
     },
     clearError: (state) => {
       state.error = null;
@@ -678,11 +746,14 @@ const manifoldSlice = createSlice({
       .addCase(sendValveCommand.fulfilled, (state, action) => {
         const { valveId, action: valveAction } = action.payload;
 
-        // Optimistic update: Update valve status immediately
         Object.values(state.valves).forEach((valveList) => {
           const valve = valveList.find((v) => v._id === valveId);
           if (valve) {
-            valve.operationalData.currentStatus = valveAction;
+            // PULSE: firmware-timed momentary relay — only track cycle count
+            // ON / OFF: persistent state change
+            if (valveAction !== 'PULSE') {
+              valve.operationalData.currentStatus = valveAction as 'ON' | 'OFF';
+            }
             valve.operationalData.cycleCount += 1;
           }
         });
@@ -768,6 +839,37 @@ const manifoldSlice = createSlice({
             valve.operationalData.autoOffDurationSec = autoOffDurationSec;
           }
         });
+      })
+      // Resolve alarm
+      .addCase(resolveAlarm.fulfilled, (state, action) => {
+        const { valveId, alarmId } = action.payload;
+        Object.values(state.valves).forEach((valveList) => {
+          const valve = valveList.find((v) => v._id === valveId);
+          if (valve) {
+            const alarm = valve.alarms.find((a) => a.alarmId === alarmId);
+            if (alarm) {
+              alarm.resolved = true;
+              alarm.resolvedAt = new Date().toISOString();
+              alarm.acknowledged = true;
+              if (!alarm.acknowledgedAt) {
+                alarm.acknowledgedAt = new Date().toISOString();
+              }
+            }
+          }
+        });
+      })
+      // Update valve (general config)
+      .addCase(updateValve.fulfilled, (state, action) => {
+        const { valveId, valve: updatedData } = action.payload;
+        Object.values(state.valves).forEach((valveList) => {
+          const idx = valveList.findIndex((v) => v._id === valveId);
+          if (idx !== -1 && updatedData) {
+            valveList[idx] = { ...valveList[idx], ...updatedData };
+          }
+        });
+      })
+      .addCase(updateValve.rejected, (state, action) => {
+        state.error = action.error.message || 'Failed to update valve';
       });
   },
 });
@@ -777,6 +879,7 @@ export const {
   updateValveStatus,
   updateManifoldStatus,
   commandAcknowledged,
+  updateDeviceSensorData,
   clearError,
 } = manifoldSlice.actions;
 

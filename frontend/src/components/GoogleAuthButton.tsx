@@ -31,11 +31,13 @@ declare global {
 interface GoogleAuthButtonProps {
   onSuccess?: () => void;
   onError?: (error: string) => void;
+  redirectTo?: string;
 }
 
 export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({
   onSuccess,
   onError,
+  redirectTo = '/dashboard',
 }) => {
   const dispatch = useDispatch<AppDispatch>();
   const router = useRouter();
@@ -48,7 +50,7 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({
     try {
       await dispatch(googleLogin({ credential: response.credential })).unwrap();
       onSuccess?.();
-      router.push('/dashboard');
+      router.push(redirectTo);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Google sign-in failed';
       console.error('Google sign-in error:', error);
@@ -56,7 +58,7 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [dispatch, onSuccess, onError, router]);
+  }, [dispatch, onSuccess, onError, router, redirectTo]);
 
   const renderGoogleButton = React.useCallback(() => {
     if (window.google && buttonContainerRef.current && !buttonContainerRef.current.hasChildNodes()) {

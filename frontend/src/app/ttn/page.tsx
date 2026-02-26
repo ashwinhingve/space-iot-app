@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef, Suspense } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import { useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { MainLayout } from '@/components/MainLayout';
@@ -94,6 +95,13 @@ function getRssiColor(rssi: number): string {
   return 'text-red-500';
 }
 
+// A device/gateway is considered "online" only if it sent data within the last 15 minutes
+const ONLINE_THRESHOLD_MS = 15 * 60 * 1000;
+function isEffectivelyOnline(lastSeen?: string | null): boolean {
+  if (!lastSeen) return false;
+  return Date.now() - new Date(lastSeen).getTime() < ONLINE_THRESHOLD_MS;
+}
+
 
 
 
@@ -142,6 +150,27 @@ function ChartCard({
     </div>
   );
 }
+
+// ─── URL params handler (needs Suspense boundary) ─────────────────────────────
+
+function SearchParamsHandler({
+  onParams,
+}: {
+  onParams: (appId: string | null, deviceId: string | null) => void;
+}) {
+  const searchParams = useSearchParams();
+  const appId = searchParams.get('appId');
+  const deviceId = searchParams.get('deviceId');
+
+  useEffect(() => {
+    onParams(appId, deviceId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appId, deviceId]);
+
+  return null;
+}
+
+// ─── Main TTN Page ─────────────────────────────────────────────────────────────
 
 export default function TTNPage() {
   const dispatch = useDispatch<AppDispatch>();
@@ -197,6 +226,11 @@ export default function TTNPage() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [downloadError, setDownloadError] = useState('');
   const [downloading, setDownloading] = useState(false);
+  // URL params: highlighted device from /devices page navigation
+  const [highlightedDeviceId, setHighlightedDeviceId] = useState<string | null>(null);
+  const deviceCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [pendingAppId, setPendingAppId] = useState<string | null>(null);
+  const [pendingDeviceId, setPendingDeviceId] = useState<string | null>(null);
 
   // Form states
   const [newApp, setNewApp] = useState({
@@ -233,6 +267,32 @@ export default function TTNPage() {
   useEffect(() => {
     dispatch(fetchTTNApplications());
   }, [dispatch]);
+
+  // When applications load, auto-select pending app from URL params
+  useEffect(() => {
+    if (!pendingAppId || applications.length === 0) return;
+    const app = applications.find((a) => a._id === pendingAppId || a.applicationId === pendingAppId);
+    if (app && selectedApplication?._id !== app._id) {
+      dispatch(setSelectedApplication(app));
+      setActiveTab('devices');
+    }
+  }, [pendingAppId, applications, selectedApplication, dispatch]);
+
+  // When devices load, highlight the pending device from URL params
+  useEffect(() => {
+    if (!pendingDeviceId || devices.length === 0) return;
+    const device = devices.find((d) => d._id === pendingDeviceId || d.deviceId === pendingDeviceId);
+    if (device) {
+      setHighlightedDeviceId(device._id);
+      // Scroll to device card after render
+      setTimeout(() => {
+        const el = deviceCardRefs.current[device._id];
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 300);
+      // Clear highlight after 3 seconds
+      setTimeout(() => setHighlightedDeviceId(null), 3000);
+    }
+  }, [pendingDeviceId, devices]);
 
   // Refresh data for selected app
   const refreshAppData = useCallback(() => {
@@ -756,6 +816,16 @@ export default function TTNPage() {
 
   return (
     <MainLayout>
+      {/* URL search params handler (needs Suspense for Next.js App Router) */}
+      <Suspense fallback={null}>
+        <SearchParamsHandler
+          onParams={(appId, deviceId) => {
+            if (appId) setPendingAppId(appId);
+            if (deviceId) setPendingDeviceId(deviceId);
+          }}
+        />
+      </Suspense>
+
       <div className="relative min-h-screen">
         <AnimatedBackground variant="subtle" showParticles={true} showGradientOrbs={true} />
 
@@ -1372,9 +1442,9 @@ export default function TTNPage() {
                                   <tr key={gw._id} className="border-b border-border/30 hover:bg-secondary/20 cursor-pointer" onClick={() => navigateToLogsForGateway(gw.gatewayId)}>
                                     <td className="py-2 pr-2 font-mono text-xs">{gw.name || gw.gatewayId}</td>
                                     <td className="py-2 pr-2 text-center">
-                                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${gw.isOnline ? 'bg-green-500/10 text-green-500' : 'bg-slate-500/10 text-slate-500'}`}>
-                                        <span className={`h-1.5 w-1.5 rounded-full ${gw.isOnline ? 'bg-green-500' : 'bg-slate-500'}`} />
-                                        {gw.isOnline ? 'Online' : 'Offline'}
+                                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${isEffectivelyOnline(gw.lastSeen) ? 'bg-green-500/10 text-green-500' : 'bg-slate-500/10 text-slate-500'}`}>
+                                        <span className={`h-1.5 w-1.5 rounded-full ${isEffectivelyOnline(gw.lastSeen) ? 'bg-green-500' : 'bg-slate-500'}`} />
+                                        {isEffectivelyOnline(gw.lastSeen) ? 'Online' : 'Offline'}
                                       </span>
                                     </td>
                                     <td className="py-2 pr-2 text-right font-semibold">{gw.metrics.totalUplinksSeen}</td>
@@ -1447,12 +1517,15 @@ export default function TTNPage() {
                       {devices.map((device) => (
                         <motion.div
                           key={device._id}
+                          ref={(el) => { deviceCardRefs.current[device._id] = el; }}
                           initial={{ opacity: 0, scale: 0.95 }}
                           animate={{ opacity: 1, scale: 1 }}
                           className={`p-5 rounded-xl bg-card/50 backdrop-blur-sm border transition-all cursor-pointer ${
-                            selectedMonitorDevice?._id === device._id
-                              ? 'border-green-500/50 bg-green-500/5'
-                              : 'border-border/50 hover:border-green-500/30'
+                            highlightedDeviceId === device._id
+                              ? 'border-violet-500/60 bg-violet-500/8 ring-2 ring-violet-500/40 shadow-lg shadow-violet-500/20'
+                              : selectedMonitorDevice?._id === device._id
+                                ? 'border-green-500/50 bg-green-500/5'
+                                : 'border-border/50 hover:border-green-500/30'
                           }`}
                           onClick={() => setSelectedMonitorDevice(prev => prev?._id === device._id ? null : device)}
                         >
@@ -1498,10 +1571,10 @@ export default function TTNPage() {
                               <p className="text-xs font-mono text-muted-foreground truncate">{device.deviceId}</p>
                             </div>
                             <span className={`ml-2 px-2 py-1 rounded-full text-xs flex items-center gap-1 shrink-0 ${
-                              device.isOnline ? 'bg-green-500/10 text-green-500' : 'bg-slate-500/10 text-slate-500'
+                              isEffectivelyOnline(device.lastSeen) ? 'bg-green-500/10 text-green-500' : 'bg-slate-500/10 text-slate-500'
                             }`}>
-                              {device.isOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
-                              {device.isOnline ? 'Online' : 'Offline'}
+                              {isEffectivelyOnline(device.lastSeen) ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+                              {isEffectivelyOnline(device.lastSeen) ? 'Online' : 'Offline'}
                             </span>
                           </div>
 
@@ -1510,7 +1583,7 @@ export default function TTNPage() {
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">Connected Time</span>
                               <span className="text-xs">
-                                {device.isOnline && device.connectedSince
+                                {isEffectivelyOnline(device.lastSeen) && device.connectedSince
                                   ? formatDate(device.connectedSince)
                                   : '-'}
                               </span>
@@ -1523,7 +1596,7 @@ export default function TTNPage() {
                                   : device.lastSeen ? formatDate(device.lastSeen) : '—'}
                               </span>
                             </div>
-                            {!device.isOnline && device.lastSeen && (
+                            {!isEffectivelyOnline(device.lastSeen) && device.lastSeen && (
                               <div className="flex justify-between">
                                 <span className="text-orange-400/80 text-muted-foreground">Disconnected</span>
                                 <span className="text-xs text-orange-400/80">{formatDate(device.lastSeen)}</span>
@@ -1869,7 +1942,7 @@ export default function TTNPage() {
                         </div>
                         <div className="p-4 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
                           <p className="text-2xl font-bold text-green-500">
-                            {gateways.filter((gw) => gw.isOnline).length}
+                            {gateways.filter((gw) => isEffectivelyOnline(gw.lastSeen)).length}
                           </p>
                           <p className="text-xs text-muted-foreground">Online</p>
                         </div>
@@ -1897,15 +1970,15 @@ export default function TTNPage() {
                               </div>
                             </div>
                             <span className={`px-2 py-1 rounded-full text-xs flex items-center gap-1 ${
-                              gw.isOnline ? 'bg-green-500/10 text-green-500' : 'bg-slate-500/10 text-slate-500'
+                              isEffectivelyOnline(gw.lastSeen) ? 'bg-green-500/10 text-green-500' : 'bg-slate-500/10 text-slate-500'
                             }`}>
-                              <span className={`h-1.5 w-1.5 rounded-full ${gw.isOnline ? 'bg-green-500' : 'bg-slate-500'}`} />
-                              {gw.isOnline ? 'Online' : 'Offline'}
+                              <span className={`h-1.5 w-1.5 rounded-full ${isEffectivelyOnline(gw.lastSeen) ? 'bg-green-500' : 'bg-slate-500'}`} />
+                              {isEffectivelyOnline(gw.lastSeen) ? 'Online' : 'Offline'}
                             </span>
                           </div>
 
                           <div className="space-y-1.5 text-sm">
-                            {(gw.connectedSince || gw.firstSeen) && (
+                            {isEffectivelyOnline(gw.lastSeen) && (gw.connectedSince || gw.firstSeen) && (
                               <div className="flex justify-between">
                                 <span className="text-muted-foreground">Connected Time</span>
                                 <span className="text-xs">{formatRelativeTime(gw.connectedSince || gw.firstSeen)}</span>
@@ -1915,7 +1988,7 @@ export default function TTNPage() {
                               <span className="text-muted-foreground">Last Update</span>
                               <span className="text-xs">{formatRelativeTime(gw.lastSeen)}</span>
                             </div>
-                            {!gw.isOnline && (
+                            {!isEffectivelyOnline(gw.lastSeen) && gw.lastSeen && (
                               <div className="flex justify-between">
                                 <span className="text-orange-400/80 text-muted-foreground">Disconnected</span>
                                 <span className="text-xs text-orange-400/80">{formatDate(gw.lastSeen)}</span>

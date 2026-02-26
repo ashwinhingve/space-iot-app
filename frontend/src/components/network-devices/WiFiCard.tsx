@@ -178,13 +178,11 @@ export function WiFiCard({ device, onEdit, onDelete }: Props) {
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      socket.emit('joinDevice', device._id);
+      socket.emit('joinNetworkDevice', device._id);
     });
 
-    socket.on('deviceData', (payload: { deviceId: string; data: ESPLiveData }) => {
-      if (payload.deviceId === device._id) {
-        setLive((prev) => ({ ...prev, ...payload.data }));
-      }
+    socket.on('networkDeviceData', (payload: { deviceId: string; data: ESPLiveData }) => {
+      setLive((prev) => ({ ...prev, ...payload.data }));
     });
 
     return () => { socket.disconnect(); };

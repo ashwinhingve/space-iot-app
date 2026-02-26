@@ -1,14 +1,23 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Signal } from 'lucide-react';
+import { Socket } from 'socket.io-client';
 import { NetworkDevice } from '@/store/slices/networkDeviceSlice';
 import { CardShell, KvRow, MiniTag, SignalBar } from './DeviceShared';
+import { createAuthenticatedSocket } from '@/lib/socket';
 
 interface Props {
   device: NetworkDevice;
   onEdit: (device: NetworkDevice) => void;
   onDelete: (device: NetworkDevice) => void;
+}
+
+interface GSMLiveData {
+  signal?: number;
+  networkType?: string;
+  voltage?: number;
+  location?: { lat: number; lng: number };
 }
 
 const NETWORK_COLORS: Record<string, string> = {
@@ -25,7 +34,45 @@ export function GSMCard({ device, onEdit, onDelete }: Props) {
     : device.mqttDeviceId
       ? `MQTT: ${device.mqttDeviceId}`
       : 'No identifier';
-  const hasGps = cfg.location?.lat !== undefined && cfg.location?.lng !== undefined;
+
+  const [live, setLive] = useState<GSMLiveData>({});
+  const socketRef = useRef<Socket | null>(null);
+
+  useEffect(() => {
+    if (!device.mqttDeviceId) return;
+    const socket = createAuthenticatedSocket();
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      socket.emit('joinNetworkDevice', device._id);
+    });
+
+    socket.on('networkDeviceData', (payload: { deviceId: string; data: GSMLiveData }) => {
+      setLive((prev) => ({ ...prev, ...payload.data }));
+    });
+
+    socket.on('networkDeviceLocation', (payload: { deviceId: string; location: { lat: number; lng: number } }) => {
+      setLive((prev) => ({ ...prev, location: payload.location }));
+    });
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [device._id, device.mqttDeviceId]);
+
+  const signalValue = live.signal ?? device.signalStrength;
+  const liveLocation = live.location;
+  const hasGps = liveLocation
+    ? true
+    : cfg.location?.lat !== undefined && cfg.location?.lng !== undefined;
+  const gpsCoords = liveLocation
+    ? `${liveLocation.lat.toFixed(4)}, ${liveLocation.lng.toFixed(4)}`
+    : hasGps
+      ? `${cfg.location!.lat.toFixed(4)}, ${cfg.location!.lng.toFixed(4)}`
+      : null;
+
+  const networkType = live.networkType ?? cfg.networkType;
 
   return (
     <CardShell
@@ -42,26 +89,30 @@ export function GSMCard({ device, onEdit, onDelete }: Props) {
       onDelete={() => onDelete(device)}
     >
       {device.mqttDeviceId && (
-        <KvRow label="MQTT Topic" value={`devices/${device.mqttDeviceId}/data`} mono />
+        <KvRow label="MQTT Topic" value={`gsm/${device.mqttDeviceId}/data`} mono />
       )}
       {cfg.imei && <KvRow label="IMEI" value={cfg.imei} mono />}
+      {live.voltage !== undefined && (
+        <KvRow label="Voltage" value={`${live.voltage.toFixed(2)} V`} mono />
+      )}
       <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
         <MiniTag color="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">GSM</MiniTag>
-        {cfg.networkType && (
-          <MiniTag color={NETWORK_COLORS[cfg.networkType] ?? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}>
-            {cfg.networkType}
+        {networkType && (
+          <MiniTag color={NETWORK_COLORS[networkType] ?? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}>
+            {networkType}
+          </MiniTag>
+        )}
+        {live.signal !== undefined && (
+          <MiniTag color="bg-teal-500/10 text-teal-400 border border-teal-500/20">
+            Live
           </MiniTag>
         )}
       </div>
-      {hasGps && (
-        <KvRow
-          label="GPS"
-          value={`${cfg.location!.lat.toFixed(4)}, ${cfg.location!.lng.toFixed(4)}`}
-          mono
-        />
+      {gpsCoords && (
+        <KvRow label="GPS" value={gpsCoords} mono />
       )}
-      {device.signalStrength !== undefined && (
-        <SignalBar value={device.signalStrength} />
+      {signalValue !== undefined && (
+        <SignalBar value={signalValue} />
       )}
     </CardShell>
   );

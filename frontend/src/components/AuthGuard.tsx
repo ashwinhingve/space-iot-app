@@ -11,7 +11,7 @@ interface AuthGuardProps {
 }
 
 // Routes that require authentication
-const protectedRoutes = ['/dashboard', '/devices', '/manifolds', '/device', '/ttn'];
+const protectedRoutes = ['/dashboard', '/devices', '/manifolds', '/device', '/ttn', '/scada', '/oms', '/reports', '/sld', '/command-area-map'];
 
 // Routes that should redirect to dashboard if already authenticated
 const authRoutes = ['/login', '/register'];

@@ -235,21 +235,21 @@ export const fetchAnalytics = createAsyncThunk(
         return date.toLocaleDateString('en-US', { weekday: 'short' });
       });
 
-      // Simulate activity data based on device count (will be replaced with real analytics endpoint)
+      // Stable baseline from real device count (no random values)
       const deviceActivity = {
         labels: last7Days,
-        data: last7Days.map(() => Math.floor(Math.random() * devices.length * 10) + devices.length),
+        data: last7Days.map(() => devices.length),
       };
 
       const valveOperations = {
         labels: last7Days,
-        onCount: last7Days.map(() => Math.floor(Math.random() * 20) + 5),
-        offCount: last7Days.map(() => Math.floor(Math.random() * 15) + 3),
+        onCount: last7Days.map(() => 0),
+        offCount: last7Days.map(() => 0),
       };
 
       const energyConsumption = {
         labels: last7Days,
-        data: last7Days.map(() => Math.floor(Math.random() * 100) + 50),
+        data: last7Days.map(() => 0),
       };
 
       // Real metrics

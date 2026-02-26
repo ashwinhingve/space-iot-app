@@ -174,9 +174,9 @@ export const getCurrentUser = createAsyncThunk(
       const data = await response.json();
 
       if (!response.ok) {
-        // Token is invalid, clear storage
+        // Token is invalid (401/403) — clear storage and force re-login
         clearAuthData();
-        return rejectWithValue(data.message || 'Session expired');
+        return rejectWithValue('SESSION_EXPIRED');
       }
 
       // Update user in localStorage
@@ -185,10 +185,10 @@ export const getCurrentUser = createAsyncThunk(
       }
 
       return data;
-    } catch (error) {
-      clearAuthData();
-      const errorMessage = error instanceof Error ? error.message : 'Network error';
-      return rejectWithValue(errorMessage);
+    } catch {
+      // Network/fetch error — backend may be temporarily unreachable.
+      // Do NOT clear localStorage; the token is likely still valid.
+      return rejectWithValue('NETWORK_ERROR');
     }
   }
 );
@@ -281,11 +281,15 @@ const authSlice = createSlice({
         state.isAuthenticated = true;
         state.error = null;
       })
-      .addCase(getCurrentUser.rejected, (state) => {
+      .addCase(getCurrentUser.rejected, (state, action) => {
         state.loading = false;
-        state.user = null;
-        state.token = null;
-        state.isAuthenticated = false;
+        // Only clear auth state on real auth failures (expired/invalid token).
+        // For network errors the token may still be valid — keep the user logged in.
+        if (action.payload !== 'NETWORK_ERROR') {
+          state.user = null;
+          state.token = null;
+          state.isAuthenticated = false;
+        }
       });
   },
 });

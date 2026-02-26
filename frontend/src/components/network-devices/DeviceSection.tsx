@@ -2,9 +2,8 @@
 
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Plus, SlidersHorizontal } from 'lucide-react';
+import { Search, Plus, SlidersHorizontal, Bluetooth } from 'lucide-react';
 import { NetworkDevice, NetworkProtocol, NetworkDeviceStatus } from '@/store/slices/networkDeviceSlice';
-import { LoRaWANCard } from './LoRaWANCard';
 import { WiFiCard } from './WiFiCard';
 import { BluetoothCard } from './BluetoothCard';
 import { GSMCard } from './GSMCard';
@@ -35,7 +34,7 @@ interface Props {
 
 function renderCard(device: NetworkDevice, onEdit: (d: NetworkDevice) => void, onDelete: (d: NetworkDevice) => void) {
   switch (device.protocol) {
-    case 'lorawan': return <LoRaWANCard key={device._id} device={device} onEdit={onEdit} onDelete={onDelete} />;
+    case 'lorawan': return null; // LoRaWAN is rendered via LoRaWANSection in devices/page.tsx
     case 'wifi': return <WiFiCard key={device._id} device={device} onEdit={onEdit} onDelete={onDelete} />;
     case 'bluetooth': return <BluetoothCard key={device._id} device={device} onEdit={onEdit} onDelete={onDelete} />;
     case 'gsm': return <GSMCard key={device._id} device={device} onEdit={onEdit} onDelete={onDelete} />;
@@ -102,6 +101,25 @@ export function DeviceSection({ protocol, devices, loading, onAdd, onEdit, onDel
           Add Device
         </button>
       </div>
+
+      {/* Bluetooth Coming Soon Banner */}
+      {protocol === 'bluetooth' && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-start gap-4 p-4 rounded-2xl border border-blue-500/25 bg-blue-500/5"
+        >
+          <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20 shrink-0">
+            <Bluetooth className="w-5 h-5 text-blue-400" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-blue-400 mb-0.5">Bluetooth Integration — Coming Soon</p>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Full BLE real-time integration is under development. You can register Bluetooth devices now and they will be automatically activated once the integration is ready.
+            </p>
+          </div>
+        </motion.div>
+      )}
 
       {/* Grid */}
       {loading ? (

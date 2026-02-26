@@ -1,55 +1,370 @@
 'use client';
 
-import React, { useMemo } from 'react';
-import dynamic from 'next/dynamic';
-import { motion } from 'framer-motion';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
 import Link from 'next/link';
+import { motion } from 'framer-motion';
 import { MainLayout } from '@/components/MainLayout';
 import AnimatedBackground from '@/components/AnimatedBackground';
-import { Monitor, ArrowLeft, Power, RotateCcw, Activity, Droplets } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { AppDispatch, RootState } from '@/store/store';
 import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-} from 'recharts';
-import { useManifoldSimulation, getPressureColor } from '@/hooks/useManifoldSimulation';
+  fetchManifolds,
+  fetchManifoldDetail,
+  sendValveCommand,
+  updateValveMode,
+  updateValveStatus,
+  updateDeviceSensorData,
+} from '@/store/slices/manifoldSlice';
+import { createAuthenticatedSocket } from '@/lib/socket';
+import {
+  Monitor,
+  ArrowLeft,
+  Zap,
+  Gauge,
+  Battery,
+  Signal,
+  ChevronRight,
+  Power,
+  Server,
+  Activity,
+  Loader2,
+} from 'lucide-react';
 
-const Manifold3DViewer = dynamic(
-  () => import('@/components/Manifold3DViewer').then(mod => mod.Manifold3DViewer),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="w-full h-[500px] flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-xl">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-          <span className="text-white/60 text-sm">Loading 3D Engine...</span>
-        </div>
-      </div>
-    ),
-  }
-);
+// ─── Types ─────────────────────────────────────────────────────────────────
 
-function PressureDot({ pressure }: { pressure: number }) {
-  const color = getPressureColor(pressure);
-  const cls =
-    color === 'green'
-      ? 'bg-green-500 shadow-green-500/50'
-      : color === 'yellow'
-        ? 'bg-yellow-500 shadow-yellow-500/50'
-        : 'bg-red-500 shadow-red-500/50';
-  return <span className={`inline-block w-2.5 h-2.5 rounded-full shadow-lg ${cls}`} />;
+type ScadaTab = 'scada' | 'sld';
+
+interface Valve {
+  _id: string;
+  valveNumber: number;
+  operationalData: {
+    currentStatus: 'ON' | 'OFF' | 'FAULT';
+    mode: 'AUTO' | 'MANUAL';
+  };
 }
 
-export default function ScadaPage() {
-  const sim = useManifoldSimulation();
+// ─── SLD Diagram ──────────────────────────────────────────────────────────
 
-  const chartData = useMemo(() => sim.timeSeries, [sim.timeSeries]);
+function SLDDiagram({ valves }: { valves: Valve[] }) {
+  if (valves.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
+        Select a manifold to view its electrical diagram.
+      </div>
+    );
+  }
+
+  const colWidth = 120;
+  const svgWidth = Math.max(800, 60 + valves.length * colWidth + 60);
+  const svgHeight = 480;
+
+  const getLineColor = (status: 'ON' | 'OFF' | 'FAULT') => {
+    if (status === 'ON') return '#10b981';
+    if (status === 'FAULT') return '#ef4444';
+    return '#475569';
+  };
+  const isDashed = (status: 'ON' | 'OFF' | 'FAULT') => status === 'OFF';
+
+  return (
+    <div className="overflow-x-auto rounded-xl border border-border/50 bg-slate-950">
+      <svg
+        viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+        width="100%"
+        style={{ minWidth: Math.max(640, svgWidth) }}
+        aria-label="Single Line Diagram"
+      >
+        {/* Background */}
+        <rect width={svgWidth} height={svgHeight} fill="#0f172a" />
+
+        {/* Grid lines */}
+        {Array.from({ length: 10 }).map((_, i) => (
+          <line key={i} x1={0} y1={i * 48} x2={svgWidth} y2={i * 48} stroke="rgba(255,255,255,0.03)" strokeWidth={1} />
+        ))}
+
+        {/* Mains input (top) */}
+        <rect x={svgWidth / 2 - 50} y={20} width={100} height={28} rx={4} fill="#1e3a5f" stroke="#3b82f6" strokeWidth={1.5} />
+        <text x={svgWidth / 2} y={38} textAnchor="middle" fill="#93c5fd" fontSize={11} fontWeight="bold">MAINS 230V</text>
+
+        {/* Line from mains down to isolator */}
+        <line x1={svgWidth / 2} y1={48} x2={svgWidth / 2} y2={90} stroke="#3b82f6" strokeWidth={2} />
+
+        {/* Isolator */}
+        <rect x={svgWidth / 2 - 30} y={90} width={60} height={22} rx={3} fill="#1a2a3a" stroke="#64748b" strokeWidth={1} />
+        <text x={svgWidth / 2} y={105} textAnchor="middle" fill="#94a3b8" fontSize={9}>ISOLATOR</text>
+
+        {/* Line to main DB */}
+        <line x1={svgWidth / 2} y1={112} x2={svgWidth / 2} y2={140} stroke="#3b82f6" strokeWidth={2} />
+
+        {/* Main DB */}
+        <rect x={svgWidth / 2 - 60} y={140} width={120} height={28} rx={4} fill="#1a2030" stroke="#6366f1" strokeWidth={1.5} />
+        <text x={svgWidth / 2} y={158} textAnchor="middle" fill="#a5b4fc" fontSize={11} fontWeight="bold">MAIN DB</text>
+
+        {/* Horizontal bus bar */}
+        {valves.length > 0 && (
+          <line
+            x1={60 + colWidth / 2}
+            y1={168}
+            x2={60 + (valves.length - 1) * colWidth + colWidth / 2}
+            y2={168}
+            stroke="#475569"
+            strokeWidth={3}
+          />
+        )}
+
+        {/* Per-valve columns */}
+        {valves.map((valve, i) => {
+          const cx = 60 + i * colWidth + colWidth / 2;
+          const color = getLineColor(valve.operationalData.currentStatus);
+          const dashed = isDashed(valve.operationalData.currentStatus);
+          const strokeDash = dashed ? '6 4' : undefined;
+
+          return (
+            <g key={valve._id}>
+              {/* Bus tap line */}
+              <line x1={cx} y1={168} x2={cx} y2={200} stroke={color} strokeWidth={2} strokeDasharray={strokeDash} />
+
+              {/* MCB rectangle */}
+              <rect x={cx - 18} y={200} width={36} height={22} rx={3} fill="#1e293b" stroke={color} strokeWidth={1.5} />
+              <text x={cx} y={214} textAnchor="middle" fill={color} fontSize={8} fontWeight="bold">MCB</text>
+
+              {/* Line to valve */}
+              <line x1={cx} y1={222} x2={cx} y2={268} stroke={color} strokeWidth={2} strokeDasharray={strokeDash} />
+
+              {/* Valve circle */}
+              <circle cx={cx} cy={282} r={18} fill="#0f172a" stroke={color} strokeWidth={2} />
+              {valve.operationalData.currentStatus === 'ON' && (
+                <>
+                  <line x1={cx - 12} y1={282} x2={cx + 12} y2={282} stroke={color} strokeWidth={2} />
+                  <line x1={cx} y1={270} x2={cx - 10} y2={294} stroke={color} strokeWidth={1.5} />
+                  <line x1={cx} y1={270} x2={cx + 10} y2={294} stroke={color} strokeWidth={1.5} />
+                </>
+              )}
+              {valve.operationalData.currentStatus === 'FAULT' && (
+                <>
+                  <line x1={cx - 10} y1={272} x2={cx + 10} y2={292} stroke={color} strokeWidth={2.5} />
+                  <line x1={cx + 10} y1={272} x2={cx - 10} y2={292} stroke={color} strokeWidth={2.5} />
+                </>
+              )}
+              {valve.operationalData.currentStatus === 'OFF' && (
+                <line x1={cx - 12} y1={282} x2={cx + 12} y2={282} stroke={color} strokeWidth={2} strokeDasharray="4 3" />
+              )}
+
+              {/* Zone terminal label */}
+              <line x1={cx} y1={300} x2={cx} y2={340} stroke={color} strokeWidth={1.5} strokeDasharray={dashed ? '4 3' : undefined} />
+              <rect x={cx - 22} y={340} width={44} height={20} rx={3} fill="#0f172a" stroke={color} strokeWidth={1} />
+              <text x={cx} y={354} textAnchor="middle" fill={color} fontSize={9} fontWeight="bold">
+                V{valve.valveNumber}
+              </text>
+
+              {/* Status label */}
+              <text x={cx} y={380} textAnchor="middle" fill={color} fontSize={8}>
+                {valve.operationalData.currentStatus}
+              </text>
+              <text x={cx} y={393} textAnchor="middle" fill="#64748b" fontSize={7}>
+                {valve.operationalData.mode}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* Legend */}
+        {[
+          { color: '#10b981', label: 'ON', x: 20, dashed: false },
+          { color: '#475569', label: 'OFF', x: 70, dashed: true },
+          { color: '#ef4444', label: 'FAULT', x: 120, dashed: false },
+        ].map(({ color, label, x, dashed }) => (
+          <g key={label}>
+            <line x1={x} y1={svgHeight - 20} x2={x + 20} y2={svgHeight - 20} stroke={color} strokeWidth={2} strokeDasharray={dashed ? '4 3' : undefined} />
+            <text x={x + 24} y={svgHeight - 16} fill={color} fontSize={9}>{label}</text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+// ─── Sensor Chip ──────────────────────────────────────────────────────────
+
+function SensorChip({
+  icon,
+  label,
+  value,
+  color,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string | null;
+  color: string;
+}) {
+  return (
+    <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${color} text-sm transition-opacity ${value === null ? 'opacity-50' : ''}`}>
+      {icon}
+      <span className="text-muted-foreground text-xs font-medium">{label}</span>
+      <span className="font-bold tabular-nums">{value ?? '—'}</span>
+    </div>
+  );
+}
+
+// ─── Valve Control Card ───────────────────────────────────────────────────
+
+type PendingAction = 'ON' | 'OFF' | 'PULSE' | 'MODE' | null;
+
+function ValveControlCard({
+  valve,
+  onCommand,
+  onModeToggle,
+}: {
+  valve: Valve;
+  onCommand: (action: 'ON' | 'OFF' | 'PULSE') => Promise<unknown>;
+  onModeToggle: () => Promise<unknown>;
+}) {
+  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
+  const status = valve.operationalData.currentStatus;
+  const mode = valve.operationalData.mode;
+
+  const handleCommand = useCallback(async (action: 'ON' | 'OFF' | 'PULSE') => {
+    if (pendingAction) return;
+    setPendingAction(action);
+    try {
+      await onCommand(action);
+    } finally {
+      setPendingAction(null);
+    }
+  }, [pendingAction, onCommand]);
+
+  const handleModeToggle = useCallback(async () => {
+    if (pendingAction) return;
+    setPendingAction('MODE');
+    try {
+      await onModeToggle();
+    } finally {
+      setPendingAction(null);
+    }
+  }, [pendingAction, onModeToggle]);
+
+  const statusClass =
+    status === 'ON'
+      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+      : status === 'FAULT'
+        ? 'bg-red-500/20 text-red-400 border-red-500/30'
+        : 'bg-slate-500/20 text-slate-400 border-slate-500/30';
+
+  const cardClass =
+    status === 'FAULT'
+      ? 'rounded-xl border border-red-500/40 bg-red-500/5 backdrop-blur-sm p-4 space-y-3 shadow-[0_0_14px_rgba(239,68,68,0.12)] hover:-translate-y-0.5 hover:shadow-lg transition-all duration-300'
+      : 'rounded-xl border border-border/50 bg-card/60 backdrop-blur-sm p-4 space-y-3 hover:border-border/80 hover:-translate-y-0.5 hover:shadow-md transition-all duration-300';
+
+  const ACTIONS = [
+    { action: 'ON' as const, cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25 hover:bg-emerald-500/25' },
+    { action: 'OFF' as const, cls: 'bg-slate-500/15 text-slate-400 border-slate-500/25 hover:bg-slate-500/25' },
+    { action: 'PULSE' as const, cls: 'bg-blue-500/15 text-blue-400 border-blue-500/25 hover:bg-blue-500/25' },
+  ];
+
+  return (
+    <div className={cardClass}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Power className="h-4 w-4 text-muted-foreground" />
+          <span className="font-semibold text-sm">Valve {valve.valveNumber}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${statusClass}`}>
+            {status}
+          </span>
+          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold border ${
+            mode === 'AUTO'
+              ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+              : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+          }`}>
+            {mode}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        {ACTIONS.map(({ action, cls }) => (
+          <button
+            key={action}
+            onClick={() => handleCommand(action)}
+            disabled={pendingAction !== null}
+            className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-colors flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed ${cls}`}
+          >
+            {pendingAction === action ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : action}
+          </button>
+        ))}
+      </div>
+
+      <button
+        onClick={handleModeToggle}
+        disabled={pendingAction !== null}
+        className="w-full py-1.5 rounded-lg text-[11px] font-semibold bg-muted/30 text-muted-foreground border border-border/40 hover:bg-muted/50 transition-colors flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {pendingAction === 'MODE' ? (
+          <Loader2 className="h-3 w-3 animate-spin" />
+        ) : `Switch to ${mode === 'AUTO' ? 'MANUAL' : 'AUTO'}`}
+      </button>
+    </div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────
+
+export default function ScadaPage() {
+  const dispatch = useDispatch<AppDispatch>();
+  const [activeTab, setActiveTab] = useState<ScadaTab>('scada');
+  const [selectedManifoldId, setSelectedManifoldId] = useState<string | null>(null);
+
+  const { manifolds, valves, sensorData, loading } = useSelector((s: RootState) => s.manifolds);
+
+  // Load manifolds if not cached
+  useEffect(() => {
+    if (manifolds.length === 0 && !loading) {
+      dispatch(fetchManifolds({}));
+    }
+  }, [dispatch, manifolds.length, loading]);
+
+  // Auto-select first manifold
+  useEffect(() => {
+    if (manifolds.length > 0 && !selectedManifoldId) {
+      const firstId = manifolds[0]._id;
+      setSelectedManifoldId(firstId);
+      dispatch(fetchManifoldDetail(firstId));
+    }
+  }, [manifolds, selectedManifoldId, dispatch]);
+
+  // Load detail when selection changes
+  useEffect(() => {
+    if (selectedManifoldId) {
+      dispatch(fetchManifoldDetail(selectedManifoldId));
+    }
+  }, [selectedManifoldId, dispatch]);
+
+  // Socket: live valve + sensor updates
+  useEffect(() => {
+    const socket = createAuthenticatedSocket();
+    socket.on('manifoldStatus', (d: unknown) => dispatch(updateValveStatus(d)));
+    socket.on('deviceTelemetry', (d: unknown) => dispatch(updateDeviceSensorData(d as Parameters<typeof updateDeviceSensorData>[0])));
+    return () => { socket.disconnect(); };
+  }, [dispatch]);
+
+  // Derived
+  const selectedManifold = useMemo(
+    () => manifolds.find((m) => m._id === selectedManifoldId) ?? null,
+    [manifolds, selectedManifoldId]
+  );
+
+  const manifoldValves: Valve[] = selectedManifoldId ? (valves[selectedManifoldId] ?? []) : [];
+
+  const deviceId = selectedManifold?.esp32DeviceId
+    ? typeof selectedManifold.esp32DeviceId === 'string'
+      ? selectedManifold.esp32DeviceId
+      : (selectedManifold.esp32DeviceId as { _id: string })._id
+    : null;
+
+  const telemetry = deviceId ? (sensorData[deviceId] ?? null) : null;
 
   return (
     <MainLayout>
@@ -57,6 +372,7 @@ export default function ScadaPage() {
         <AnimatedBackground variant="subtle" showParticles={true} showGradientOrbs={true} />
 
         <div className="relative z-10 container mx-auto px-4 py-6 md:py-8 max-w-7xl">
+
           {/* Breadcrumb */}
           <motion.div
             initial={{ opacity: 0, y: -10 }}
@@ -77,333 +393,169 @@ export default function ScadaPage() {
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            className="mb-6"
+            className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6"
           >
-            <div className="flex items-center justify-between flex-wrap gap-4">
-              <div className="flex items-center gap-3">
-                <div className="relative">
-                  <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl blur-lg opacity-40" />
-                  <div className="relative p-2.5 bg-gradient-to-br from-blue-500/10 to-cyan-500/10 rounded-xl border border-blue-500/20">
-                    <Monitor className="h-6 w-6 text-blue-400" />
-                  </div>
-                </div>
-                <div>
-                  <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-cyan-400 to-blue-500">
-                    Manifold SCADA
-                  </h1>
-                  <p className="text-muted-foreground text-sm">
-                    MANIFOLD-27 Interactive Control System
-                  </p>
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl blur-lg opacity-40" />
+                <div className="relative p-2.5 bg-gradient-to-br from-blue-500/10 to-cyan-500/10 rounded-xl border border-blue-500/20">
+                  <Monitor className="h-6 w-6 text-blue-400" />
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                  ONLINE
-                </span>
-                <span className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                  {sim.pressures.inlet.toFixed(0)} PSI Inlet
-                </span>
-                <span className="px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
-                  {sim.totalFlow.toFixed(1)} LPS Total
-                </span>
+              <div>
+                <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-cyan-400 to-blue-500">
+                  Pump House SCADA
+                </h1>
+                <p className="text-muted-foreground text-sm">Real-time valve monitoring & control</p>
               </div>
             </div>
-          </motion.div>
 
-          {/* 3D Viewer */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1, duration: 0.5 }}
-            className="mb-6"
-          >
-            <div className="rounded-xl overflow-hidden border border-white/10 shadow-2xl" style={{ height: 500 }}>
-              <Manifold3DViewer
-                valves={sim.valves}
-                ptfcOn={sim.ptfcOn}
-                sasfOn={sim.sasfOn}
-                pressures={sim.pressures}
-                flowRates={sim.flowRates}
-                maxPressure={sim.maxPressure}
-                isOnline={sim.isOnline}
-                onValveClick={sim.toggleValve}
-                onPTFCClick={sim.togglePTFC}
-                onSASFClick={sim.toggleSASF}
-              />
-            </div>
-          </motion.div>
-
-          {/* Dashboard Panel */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2, duration: 0.5 }}
-            className="grid grid-cols-1 lg:grid-cols-2 gap-6"
-          >
-            {/* Left Column */}
-            <div className="space-y-6">
-              {/* Valve Status Panel */}
-              <div className="rounded-xl border border-white/10 bg-card/50 backdrop-blur-sm p-5">
-                <div className="flex items-center gap-2 mb-4">
-                  <Power className="h-4 w-4 text-blue-400" />
-                  <h3 className="text-sm font-semibold text-foreground">Device Status</h3>
-                </div>
-
-                <div className="space-y-3">
-                  {/* Valve rows */}
-                  {sim.valves.map((v) => (
-                    <div key={v.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-background/50">
-                      <div className="flex items-center gap-3">
-                        <PressureDot pressure={v.pressure} />
-                        <span className="text-sm font-medium text-foreground">{v.label}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {v.pressure.toFixed(1)} PSI
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className={`text-xs font-bold ${v.isOpen ? 'text-emerald-400' : 'text-muted-foreground'}`}>
-                          {v.isOpen ? 'OPEN' : 'CLOSED'}
-                        </span>
-                        <button
-                          onClick={() => sim.toggleValve(v.id)}
-                          className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                            v.isOpen
-                              ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
-                              : 'bg-slate-500/20 text-slate-400 hover:bg-slate-500/30'
-                          }`}
-                        >
-                          {v.isOpen ? 'Close' : 'Open'}
-                        </button>
-                      </div>
-                    </div>
+            <div className="flex items-center gap-3">
+              {manifolds.length > 0 && (
+                <select
+                  value={selectedManifoldId ?? ''}
+                  onChange={(e) => setSelectedManifoldId(e.target.value || null)}
+                  className="px-3 py-2 text-sm bg-card/80 border border-border/50 rounded-xl focus:border-blue-500/40 outline-none transition-colors appearance-none cursor-pointer dark:[color-scheme:dark]"
+                >
+                  {manifolds.map((m) => (
+                    <option key={m._id} value={m._id}>{m.name}</option>
                   ))}
-
-                  {/* PTFC */}
-                  <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-background/50">
-                    <div className="flex items-center gap-3">
-                      <PressureDot pressure={sim.pressures.distribution} />
-                      <span className="text-sm font-medium text-foreground">PTFC</span>
-                      <span className="text-xs text-muted-foreground">
-                        {sim.pressures.distribution.toFixed(1)} PSI
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className={`text-xs font-bold ${sim.ptfcOn ? 'text-emerald-400' : 'text-muted-foreground'}`}>
-                        {sim.ptfcOn ? 'REGULATING' : 'BYPASS'}
-                      </span>
-                      <button
-                        onClick={sim.togglePTFC}
-                        className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                          sim.ptfcOn
-                            ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
-                            : 'bg-slate-500/20 text-slate-400 hover:bg-slate-500/30'
-                        }`}
-                      >
-                        {sim.ptfcOn ? 'Bypass' : 'Enable'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* SASF */}
-                  <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-background/50">
-                    <div className="flex items-center gap-3">
-                      <PressureDot pressure={sim.pressures.postFilter} />
-                      <span className="text-sm font-medium text-foreground">SASF</span>
-                      <span className="text-xs text-muted-foreground">
-                        {sim.pressures.postFilter.toFixed(1)} PSI
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className={`text-xs font-bold ${sim.sasfOn ? 'text-emerald-400' : 'text-muted-foreground'}`}>
-                        {sim.sasfOn ? 'ACTIVE' : 'BYPASS'}
-                      </span>
-                      <button
-                        onClick={sim.toggleSASF}
-                        className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                          sim.sasfOn
-                            ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
-                            : 'bg-slate-500/20 text-slate-400 hover:bg-slate-500/30'
-                        }`}
-                      >
-                        {sim.sasfOn ? 'Bypass' : 'Enable'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Controls Panel */}
-              <div className="rounded-xl border border-white/10 bg-card/50 backdrop-blur-sm p-5">
-                <div className="flex items-center gap-2 mb-4">
-                  <Activity className="h-4 w-4 text-cyan-400" />
-                  <h3 className="text-sm font-semibold text-foreground">Controls</h3>
-                </div>
-
-                <div className="space-y-4">
-                  {/* Target Pressure */}
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs text-muted-foreground">Target Pressure</span>
-                      <span className="text-sm font-bold text-foreground">{sim.targetPressure} PSI</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={sim.targetPressure}
-                      onChange={(e) => sim.setTargetPressure(Number(e.target.value))}
-                      className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                    />
-                    <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                      <span>0 PSI</span>
-                      <span>100 PSI</span>
-                    </div>
-                  </div>
-
-                  {/* System Stats */}
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="rounded-lg bg-background/50 p-3 text-center">
-                      <p className="text-xs text-muted-foreground mb-1">Inlet</p>
-                      <p className="text-lg font-bold text-foreground">{sim.pressures.inlet.toFixed(0)}</p>
-                      <p className="text-xs text-muted-foreground">PSI</p>
-                    </div>
-                    <div className="rounded-lg bg-background/50 p-3 text-center">
-                      <p className="text-xs text-muted-foreground mb-1">Distribution</p>
-                      <p className="text-lg font-bold text-foreground">{sim.pressures.distribution.toFixed(0)}</p>
-                      <p className="text-xs text-muted-foreground">PSI</p>
-                    </div>
-                    <div className="rounded-lg bg-background/50 p-3 text-center">
-                      <p className="text-xs text-muted-foreground mb-1">Total Flow</p>
-                      <p className="text-lg font-bold text-foreground">{sim.totalFlow.toFixed(1)}</p>
-                      <p className="text-xs text-muted-foreground">LPS</p>
-                    </div>
-                  </div>
-
-                  {/* Reset */}
-                  <button
-                    onClick={sim.resetAll}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all text-sm font-medium border border-red-500/20"
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                    Reset All
-                  </button>
-                </div>
-              </div>
+                </select>
+              )}
+              {selectedManifold && (
+                <span className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${
+                  selectedManifold.status === 'Active'
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                    : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                }`}>
+                  {selectedManifold.status}
+                </span>
+              )}
             </div>
+          </motion.div>
 
-            {/* Right Column */}
-            <div className="space-y-6">
-              {/* Pressure Chart */}
-              <div className="rounded-xl border border-white/10 bg-card/50 backdrop-blur-sm p-5">
-                <div className="flex items-center gap-2 mb-4">
-                  <Activity className="h-4 w-4 text-blue-400" />
-                  <h3 className="text-sm font-semibold text-foreground">Pressure History</h3>
+          {/* Tabs */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1, duration: 0.4 }}
+            className="flex flex-wrap gap-2 mb-6"
+          >
+            {[
+              { id: 'scada' as ScadaTab, label: 'SCADA Control', icon: Activity },
+              { id: 'sld' as ScadaTab, label: 'Single Line Diagram', icon: Zap },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border transition-all duration-200 ${
+                  activeTab === tab.id
+                    ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                    : 'bg-muted/30 text-muted-foreground hover:bg-muted/50 border-transparent'
+                }`}
+              >
+                <tab.icon className="h-4 w-4" />
+                {tab.label}
+              </button>
+            ))}
+          </motion.div>
+
+          {/* SCADA Tab */}
+          {activeTab === 'scada' && (
+            <motion.div
+              key="scada"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
+            >
+              {/* Sensor row */}
+              <div className="flex flex-wrap gap-3 mb-6">
+                <SensorChip
+                  icon={<Gauge className="h-4 w-4" />}
+                  label="PT1"
+                  value={telemetry?.pt1 != null ? `${telemetry.pt1.toFixed(1)} PSI` : null}
+                  color="bg-blue-500/10 border-blue-500/20 text-blue-400"
+                />
+                <SensorChip
+                  icon={<Gauge className="h-4 w-4" />}
+                  label="PT2"
+                  value={telemetry?.pt2 != null ? `${telemetry.pt2.toFixed(1)} PSI` : null}
+                  color="bg-cyan-500/10 border-cyan-500/20 text-cyan-400"
+                />
+                <SensorChip
+                  icon={<Battery className="h-4 w-4" />}
+                  label="Battery"
+                  value={telemetry?.battery != null ? `${telemetry.battery.toFixed(0)}%` : null}
+                  color="bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                />
+                <SensorChip
+                  icon={<Signal className="h-4 w-4" />}
+                  label="RSSI"
+                  value={telemetry?.rssi != null ? `${telemetry.rssi} dBm` : null}
+                  color="bg-purple-500/10 border-purple-500/20 text-purple-400"
+                />
+              </div>
+
+              {/* Valve grid */}
+              {loading && manifoldValves.length === 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={i} className="h-36 rounded-xl border border-border/30 bg-card/30 animate-pulse" />
+                  ))}
                 </div>
-
-                <div className="h-[280px]">
-                  {chartData.length > 1 ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={chartData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                        <XAxis
-                          dataKey="time"
-                          tick={{ fill: '#64748b', fontSize: 10 }}
-                          tickLine={false}
-                          axisLine={{ stroke: 'rgba(255,255,255,0.1)' }}
-                        />
-                        <YAxis
-                          domain={[0, 100]}
-                          tick={{ fill: '#64748b', fontSize: 10 }}
-                          tickLine={false}
-                          axisLine={{ stroke: 'rgba(255,255,255,0.1)' }}
-                          label={{ value: 'PSI', angle: -90, position: 'insideLeft', fill: '#64748b', fontSize: 10 }}
-                        />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: 'rgba(15,23,42,0.95)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            borderRadius: '8px',
-                            fontSize: '11px',
-                          }}
-                          itemStyle={{ color: '#e2e8f0' }}
-                          labelStyle={{ color: '#94a3b8' }}
-                        />
-                        <Legend
-                          wrapperStyle={{ fontSize: '10px', paddingTop: '8px' }}
-                        />
-                        <Line type="monotone" dataKey="inlet" stroke="#3b82f6" strokeWidth={2} dot={false} name="Inlet" />
-                        <Line type="monotone" dataKey="postFilter" stroke="#8b5cf6" strokeWidth={2} dot={false} name="Post-Filter" />
-                        <Line type="monotone" dataKey="distribution" stroke="#06b6d4" strokeWidth={2} dot={false} name="Distribution" />
-                        <Line type="monotone" dataKey="outlet1" stroke="#22c55e" strokeWidth={1} dot={false} name="V1" strokeDasharray="4 2" />
-                        <Line type="monotone" dataKey="outlet2" stroke="#eab308" strokeWidth={1} dot={false} name="V2" strokeDasharray="4 2" />
-                        <Line type="monotone" dataKey="outlet3" stroke="#f97316" strokeWidth={1} dot={false} name="V3" strokeDasharray="4 2" />
-                        <Line type="monotone" dataKey="outlet4" stroke="#ef4444" strokeWidth={1} dot={false} name="V4" strokeDasharray="4 2" />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-                      Collecting data...
-                    </div>
+              ) : manifoldValves.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <Server className="h-8 w-8 text-muted-foreground mb-3 opacity-40" />
+                  <p className="text-muted-foreground text-sm">
+                    {manifolds.length === 0
+                      ? 'No manifolds found. Add a manifold from the dashboard.'
+                      : 'No valves configured for this manifold.'}
+                  </p>
+                  {manifolds.length === 0 && (
+                    <Link href="/dashboard">
+                      <Button size="sm" variant="outline" className="mt-3 gap-2">
+                        <ChevronRight className="h-4 w-4" />
+                        Go to Dashboard
+                      </Button>
+                    </Link>
                   )}
                 </div>
-              </div>
-
-              {/* Flow Visualization */}
-              <div className="rounded-xl border border-white/10 bg-card/50 backdrop-blur-sm p-5">
-                <div className="flex items-center gap-2 mb-4">
-                  <Droplets className="h-4 w-4 text-cyan-400" />
-                  <h3 className="text-sm font-semibold text-foreground">Flow Distribution</h3>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {manifoldValves.map((valve) => (
+                    <ValveControlCard
+                      key={valve._id}
+                      valve={valve}
+                      onCommand={(action) =>
+                        dispatch(sendValveCommand({ valveId: valve._id, action }))
+                      }
+                      onModeToggle={() =>
+                        dispatch(
+                          updateValveMode({
+                            valveId: valve._id,
+                            mode: valve.operationalData.mode === 'AUTO' ? 'MANUAL' : 'AUTO',
+                          })
+                        )
+                      }
+                    />
+                  ))}
                 </div>
+              )}
+            </motion.div>
+          )}
 
-                <div className="space-y-3">
-                  {sim.valves.map((v) => {
-                    const maxFlow = 3.0;
-                    const pct = Math.min(100, (v.flowRate / maxFlow) * 100);
-                    const barColor = v.isOpen
-                      ? pct > 80
-                        ? 'bg-red-500'
-                        : pct > 50
-                          ? 'bg-yellow-500'
-                          : 'bg-emerald-500'
-                      : 'bg-slate-600';
+          {/* SLD Tab */}
+          {activeTab === 'sld' && (
+            <motion.div
+              key="sld"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
+            >
+              <SLDDiagram valves={manifoldValves} />
+            </motion.div>
+          )}
 
-                    return (
-                      <div key={v.id}>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs font-medium text-foreground">{v.label}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {v.flowRate.toFixed(2)} LPS
-                          </span>
-                        </div>
-                        <div className="h-3 bg-slate-800 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {/* Total flow */}
-                  <div className="pt-2 border-t border-white/10">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-semibold text-foreground">Total Flow</span>
-                      <span className="text-xs font-bold text-cyan-400">
-                        {sim.totalFlow.toFixed(2)} LPS
-                      </span>
-                    </div>
-                    <div className="h-3 bg-slate-800 rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all duration-500 bg-gradient-to-r from-blue-500 to-cyan-400"
-                        style={{ width: `${Math.min(100, (sim.totalFlow / 12) * 100)}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </motion.div>
         </div>
       </div>
     </MainLayout>

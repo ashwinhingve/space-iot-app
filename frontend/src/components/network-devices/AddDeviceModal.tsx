@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Radio, Wifi, Bluetooth, Signal, ChevronLeft } from 'lucide-react';
 import { useDispatch, useSelector } from 'react-redux';
-import { NetworkProtocol, NetworkDevice, createNetworkDevice } from '@/store/slices/networkDeviceSlice';
+import { NetworkProtocol, NetworkDevice, createNetworkDevice, updateNetworkDevice } from '@/store/slices/networkDeviceSlice';
 import { AppDispatch, RootState } from '@/store/store';
 
 // ─── Protocol options ─────────────────────────────────────────────────────────
@@ -128,14 +128,12 @@ function WiFiForm({ form, setForm }: { form: Record<string, string>; setForm: (f
         <p className="font-semibold text-sky-600 dark:text-sky-400 flex items-center gap-1.5">
           📡 ESP32 Wi-Fi Device — Sketch Configuration
         </p>
-        {/* Sketch constants */}
         <div className="rounded-lg bg-background/60 px-3 py-2 font-mono text-[10px] space-y-0.5 leading-relaxed">
           <p className="text-slate-400">{'// ── esp32_wifi_device.ino ──'}</p>
           <p><span className="text-purple-400">const char*</span> <span className="text-sky-300">DEVICE_ID</span> {`= "`}<span className="text-amber-300">{deviceId}</span>{`";`}</p>
           <p><span className="text-purple-400">const char*</span> <span className="text-sky-300">MQTT_SERVER</span> {`= `}<span className="text-amber-300">&quot;{'<broker-ip>'}&quot;</span>;</p>
           <p><span className="text-purple-400">const int</span>   <span className="text-sky-300">MQTT_PORT</span>   {"= "}<span className="text-green-300">1883</span>;</p>
         </div>
-        {/* Topics */}
         <div className="space-y-1">
           <p className="font-medium opacity-80">MQTT Topics (auto-configured by sketch):</p>
           {[
@@ -196,10 +194,10 @@ function BluetoothForm({ form, setForm }: { form: Record<string, string>; setFor
 
 function GSMForm({ form, setForm }: { form: Record<string, string>; setForm: (f: Record<string, string>) => void }) {
   const mqttTopic = form.mqttDeviceId
-    ? `devices/${form.mqttDeviceId}/data`
+    ? `gsm/${form.mqttDeviceId}/data`
     : form._name
-      ? `devices/${form._name.toLowerCase().replace(/[^a-z0-9]/g, '-')}/data`
-      : 'devices/<device-id>/data';
+      ? `gsm/${form._name.toLowerCase().replace(/[^a-z0-9]/g, '-')}/data`
+      : 'gsm/<device-id>/data';
 
   return (
     <>
@@ -223,13 +221,13 @@ function GSMForm({ form, setForm }: { form: Record<string, string>; setForm: (f:
         </Field>
       </div>
       <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/20 px-3 py-2.5 text-xs text-muted-foreground space-y-1">
-        <p className="font-medium text-emerald-600 dark:text-emerald-400">📡 ESP32 + SIM MQTT Configuration</p>
+        <p className="font-medium text-emerald-600 dark:text-emerald-400">📡 GSM Device — MQTT Configuration</p>
         <p>Publish sensor data to this topic:</p>
         <code className="block font-mono text-[11px] bg-background/60 rounded px-2 py-1 mt-1 break-all">{mqttTopic}</code>
         <div className="mt-2 space-y-0.5 opacity-80">
+          <p>Also publish to: <span className="font-mono">gsm/{'<id>'}/online</span> and <span className="font-mono">gsm/{'<id>'}/location</span></p>
           <p>Broker: <span className="font-mono">your-cluster.s1.eu.hivemq.cloud</span></p>
           <p>Port: <span className="font-mono">8883 (TLS)</span> · Auth: username + password required</p>
-          <p className="opacity-70 text-[10px] mt-1">See <span className="font-mono">console.hivemq.cloud</span> for your cluster host &amp; credentials.</p>
         </div>
       </div>
     </>
@@ -241,23 +239,69 @@ function GSMForm({ form, setForm }: { form: Record<string, string>; setForm: (f:
 interface Props {
   open: boolean;
   initialProtocol?: NetworkProtocol | null;
+  device?: NetworkDevice | null;
   onClose: () => void;
   onSuccess?: (device: NetworkDevice) => void;
 }
 
-export function AddDeviceModal({ open, initialProtocol, onClose, onSuccess }: Props) {
+export function AddDeviceModal({ open, initialProtocol, device: editDevice, onClose, onSuccess }: Props) {
   const dispatch = useDispatch<AppDispatch>();
   const { loading } = useSelector((s: RootState) => s.networkDevices);
+  const isEditing = !!editDevice;
 
-  const [step, setStep] = useState<'pick' | 'form'>(initialProtocol ? 'form' : 'pick');
-  const [protocol, setProtocol] = useState<NetworkProtocol | null>(initialProtocol ?? null);
+  const [step, setStep] = useState<'pick' | 'form'>(initialProtocol || isEditing ? 'form' : 'pick');
+  const [protocol, setProtocol] = useState<NetworkProtocol | null>(initialProtocol ?? editDevice?.protocol ?? null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [protoForm, setProtoForm] = useState<Record<string, string>>({});
 
+  // Pre-populate form fields when editing
+  useEffect(() => {
+    if (editDevice) {
+      setProtocol(editDevice.protocol);
+      setName(editDevice.name);
+      setDescription(editDevice.description ?? '');
+      setStep('form');
+
+      const pf: Record<string, string> = {};
+      if (editDevice.mqttDeviceId) pf.mqttDeviceId = editDevice.mqttDeviceId;
+
+      if (editDevice.protocol === 'lorawan' && editDevice.lorawan) {
+        const l = editDevice.lorawan;
+        if (l.devEui) pf.devEui = l.devEui;
+        if (l.appId) pf.appId = l.appId;
+        if (l.activationMode) pf.activationMode = l.activationMode;
+        if (l.deviceClass) pf.deviceClass = l.deviceClass;
+        if (l.appKey) pf.appKey = l.appKey;
+        if (l.devAddr) pf.devAddr = l.devAddr;
+      } else if (editDevice.protocol === 'wifi' && editDevice.wifi) {
+        const w = editDevice.wifi;
+        if (w.chipset) pf.chipset = w.chipset;
+        if (w.firmwareVersion) pf.firmwareVersion = w.firmwareVersion;
+        if (w.macAddress) pf.macAddress = w.macAddress;
+      } else if (editDevice.protocol === 'bluetooth' && editDevice.bluetooth) {
+        const b = editDevice.bluetooth;
+        if (b.macAddress) pf.macAddress = b.macAddress;
+        if (b.protocol) pf.protocol = b.protocol;
+        if (b.manufacturer) pf.manufacturer = b.manufacturer;
+      } else if (editDevice.protocol === 'gsm' && editDevice.gsm) {
+        const g = editDevice.gsm;
+        if (g.imei) pf.imei = g.imei;
+        if (g.networkType) pf.networkType = g.networkType;
+      }
+      setProtoForm(pf);
+    } else {
+      setProtocol(initialProtocol ?? null);
+      setStep(initialProtocol ? 'form' : 'pick');
+      setName('');
+      setDescription('');
+      setProtoForm({});
+    }
+  }, [editDevice, initialProtocol, open]);
+
   const handleClose = () => {
-    setStep(initialProtocol ? 'form' : 'pick');
-    setProtocol(initialProtocol ?? null);
+    setStep(initialProtocol || isEditing ? 'form' : 'pick');
+    setProtocol(initialProtocol ?? editDevice?.protocol ?? null);
     setName('');
     setDescription('');
     setProtoForm({});
@@ -278,8 +322,8 @@ export function AddDeviceModal({ open, initialProtocol, onClose, onSuccess }: Pr
       name,
       description: description || undefined,
       protocol,
-      tags: [],
-      status: 'offline',
+      tags: editDevice?.tags ?? [],
+      status: editDevice?.status ?? 'offline',
     };
 
     if (protocol === 'lorawan') {
@@ -292,13 +336,12 @@ export function AddDeviceModal({ open, initialProtocol, onClose, onSuccess }: Pr
         devAddr: protoForm.devAddr || undefined,
       };
     } else if (protocol === 'wifi') {
-      // Auto-generate MQTT device ID from name if not provided
       const mqttId = protoForm.mqttDeviceId || name.toLowerCase().replace(/[^a-z0-9]/g, '-');
       (payload as Record<string, unknown>).mqttDeviceId = mqttId;
       payload.wifi = {
         macAddress: protoForm.macAddress || undefined,
-        ipAddress: undefined,
-        ssid: undefined,
+        ipAddress: editDevice?.wifi?.ipAddress ?? undefined,
+        ssid: editDevice?.wifi?.ssid ?? undefined,
         chipset: protoForm.chipset || 'ESP32-DevKit-V1',
         firmwareVersion: protoForm.firmwareVersion || undefined,
       };
@@ -310,7 +353,6 @@ export function AddDeviceModal({ open, initialProtocol, onClose, onSuccess }: Pr
         firmwareVersion: undefined,
       };
     } else if (protocol === 'gsm') {
-      // Auto-generate MQTT device ID from name if not provided
       const mqttId = protoForm.mqttDeviceId || name.toLowerCase().replace(/[^a-z0-9]/g, '-');
       (payload as Record<string, unknown>).mqttDeviceId = mqttId;
       payload.gsm = {
@@ -319,10 +361,18 @@ export function AddDeviceModal({ open, initialProtocol, onClose, onSuccess }: Pr
       };
     }
 
-    const result = await dispatch(createNetworkDevice(payload));
-    if (createNetworkDevice.fulfilled.match(result)) {
-      onSuccess?.(result.payload);
-      handleClose();
+    if (isEditing && editDevice) {
+      const result = await dispatch(updateNetworkDevice({ id: editDevice._id, data: payload }));
+      if (updateNetworkDevice.fulfilled.match(result)) {
+        onSuccess?.(result.payload);
+        handleClose();
+      }
+    } else {
+      const result = await dispatch(createNetworkDevice(payload));
+      if (createNetworkDevice.fulfilled.match(result)) {
+        onSuccess?.(result.payload);
+        handleClose();
+      }
     }
   };
 
@@ -349,7 +399,7 @@ export function AddDeviceModal({ open, initialProtocol, onClose, onSuccess }: Pr
             {/* Header */}
             <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-border/50 shrink-0">
               <div className="flex items-center gap-3">
-                {step === 'form' && !initialProtocol && (
+                {step === 'form' && !initialProtocol && !isEditing && (
                   <button
                     onClick={() => setStep('pick')}
                     className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
@@ -359,10 +409,15 @@ export function AddDeviceModal({ open, initialProtocol, onClose, onSuccess }: Pr
                 )}
                 <div>
                   <h2 className="text-lg font-bold">
-                    {step === 'pick' ? 'Add Network Device' : `Add ${selectedMeta?.label} Device`}
+                    {isEditing
+                      ? `Edit ${selectedMeta?.label} Device`
+                      : step === 'pick'
+                        ? 'Add Network Device'
+                        : `Add ${selectedMeta?.label} Device`
+                    }
                   </h2>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {step === 'pick' ? 'Select a protocol to continue' : selectedMeta?.description}
+                    {isEditing ? `Update ${editDevice?.name}` : step === 'pick' ? 'Select a protocol to continue' : selectedMeta?.description}
                   </p>
                 </div>
               </div>
@@ -464,7 +519,7 @@ export function AddDeviceModal({ open, initialProtocol, onClose, onSuccess }: Pr
                       transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
                     />
                   )}
-                  Add Device
+                  {isEditing ? 'Save Changes' : 'Add Device'}
                 </button>
               </div>
             )}

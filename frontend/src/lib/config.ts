@@ -42,6 +42,8 @@ export const API_ENDPOINTS = {
   VALVE_ALARMS: (id: string) => `${API_BASE_URL}/api/valves/${id}/alarms`,
   VALVE_ALARM_ACKNOWLEDGE: (valveId: string, alarmId: string) =>
     `${API_BASE_URL}/api/valves/${valveId}/alarms/${alarmId}/acknowledge`,
+  VALVE_ALARM_RESOLVE: (valveId: string, alarmId: string) =>
+    `${API_BASE_URL}/api/valves/${valveId}/alarms/${alarmId}/resolve`,
   VALVE_SCHEDULES: (id: string) => `${API_BASE_URL}/api/valves/${id}/schedules`,
   VALVE_SCHEDULE_DETAIL: (valveId: string, scheduleId: string) =>
     `${API_BASE_URL}/api/valves/${valveId}/schedules/${scheduleId}`,
