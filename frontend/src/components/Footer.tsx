@@ -10,7 +10,6 @@ const footerLinks = [
     links: [
       { name: 'Dashboard', href: '/dashboard' },
       { name: 'Devices', href: '/devices' },
-      { name: 'Manifolds', href: '/manifolds' },
       { name: 'Documentation', href: '/documentation' },
     ],
   },

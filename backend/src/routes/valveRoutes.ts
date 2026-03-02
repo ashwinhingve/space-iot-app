@@ -25,6 +25,7 @@ router.get('/:id/history', valveController.getValveHistory);
 // Alarm Operations
 router.get('/:id/alarms', valveController.getValveAlarms);
 router.post('/:id/alarms/:alarmId/acknowledge', valveController.acknowledgeAlarm);
+router.post('/:id/alarms/:alarmId/resolve', valveController.resolveAlarm);
 
 // Schedule Operations
 router.post('/:id/schedules', valveController.createSchedule);

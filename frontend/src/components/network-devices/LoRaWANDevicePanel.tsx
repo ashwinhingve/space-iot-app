@@ -17,6 +17,12 @@ import {
   WifiOff,
   Hash,
   Zap,
+  LogIn,
+  LogOut,
+  Trash2,
+  AlertTriangle,
+  Pencil,
+  Check,
 } from 'lucide-react';
 import { TTNDevice, TTNUplink } from '@/store/slices/ttnSlice';
 import { API_ENDPOINTS } from '@/lib/config';
@@ -36,6 +42,8 @@ interface Props {
   manifolds: ManifoldLink[];
   onClose: () => void;
   onOpenInTTN: () => void;
+  onDelete?: (device: TTNDevice) => void;
+  onRename?: (device: TTNDevice, name: string, description: string) => Promise<void>;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -111,17 +119,157 @@ function UplinkRow({ uplink, index }: { uplink: TTNUplink; index: number }) {
   );
 }
 
+// ─── Delete Confirm Dialog ────────────────────────────────────────────────────
+
+function DeleteConfirmDialog({
+  deviceName,
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  deviceName: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  return (
+    <motion.div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
+      <motion.div
+        className="relative bg-card border border-border/60 rounded-2xl p-6 max-w-sm w-full shadow-2xl"
+        initial={{ scale: 0.95, y: 10 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.95, y: 10 }}
+      >
+        <div className="flex flex-col items-center text-center gap-4">
+          <div className="p-3 rounded-full bg-red-500/10 border border-red-500/20">
+            <AlertTriangle className="w-6 h-6 text-red-400" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold mb-1">Delete Device</h3>
+            <p className="text-sm text-muted-foreground">
+              This will permanently delete <span className="font-semibold text-foreground">{deviceName}</span> from
+              TTN and remove all local uplinks and downlink history.
+            </p>
+          </div>
+          <div className="flex gap-2.5 w-full">
+            <button
+              onClick={onCancel}
+              disabled={loading}
+              className="flex-1 px-4 py-2.5 text-sm rounded-xl border border-border/60 hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onConfirm}
+              disabled={loading}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold bg-red-500/10 text-red-400 border border-red-500/25 rounded-xl hover:bg-red-500/20 transition-all disabled:opacity-50"
+            >
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+              Delete
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ─── Inline Edit Form ─────────────────────────────────────────────────────────
+
+function InlineEditForm({
+  initialName,
+  initialDescription,
+  onSave,
+  onCancel,
+  loading,
+}: {
+  initialName: string;
+  initialDescription: string;
+  onSave: (name: string, description: string) => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  const [name, setName] = useState(initialName);
+  const [description, setDescription] = useState(initialDescription);
+
+  const inputClass =
+    'w-full px-3 py-2 text-sm bg-background/60 border border-border/50 rounded-xl focus:border-violet-500/40 focus:ring-1 focus:ring-violet-500/20 outline-none transition-colors placeholder:text-muted-foreground/50';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -6 }}
+      className="px-5 py-3 border-b border-border/40 bg-violet-500/5 space-y-2.5"
+    >
+      <div className="text-[10px] font-semibold uppercase tracking-widest text-violet-400/70 mb-1">
+        Edit Device Info
+      </div>
+      <div>
+        <label className="block text-[11px] font-medium text-muted-foreground mb-1">Display Name *</label>
+        <input
+          className={inputClass}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Device name"
+          autoFocus
+        />
+      </div>
+      <div>
+        <label className="block text-[11px] font-medium text-muted-foreground mb-1">Description</label>
+        <input
+          className={inputClass}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Optional description"
+        />
+      </div>
+      <p className="text-[10px] text-muted-foreground/60">
+        Changes will sync to TTN Identity Server and update local records.
+      </p>
+      <div className="flex gap-2">
+        <button
+          onClick={onCancel}
+          disabled={loading}
+          className="flex-1 px-3 py-2 text-xs rounded-xl border border-border/50 hover:bg-muted transition-colors disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => onSave(name.trim(), description.trim())}
+          disabled={loading || !name.trim()}
+          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold bg-violet-500/10 text-violet-400 border border-violet-500/25 rounded-xl hover:bg-violet-500/20 transition-all disabled:opacity-50"
+        >
+          {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+          Save to TTN
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
 // ─── Main Panel ───────────────────────────────────────────────────────────────
 
-export function LoRaWANDevicePanel({ device, applicationId, manifolds, onClose, onOpenInTTN }: Props) {
+export function LoRaWANDevicePanel({ device, applicationId, manifolds, onClose, onOpenInTTN, onDelete, onRename }: Props) {
   const [uplinks, setUplinks] = useState<TTNUplink[]>([]);
   const [uplinkLoading, setUplinkLoading] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [renameLoading, setRenameLoading] = useState(false);
 
   // Fetch recent uplinks when device changes
   useEffect(() => {
     if (!device || !applicationId) return;
     setUplinks([]);
     setUplinkLoading(true);
+    setShowEditForm(false);
 
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
     const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
@@ -138,6 +286,29 @@ export function LoRaWANDevicePanel({ device, applicationId, manifolds, onClose, 
   const displayName = device ? (device.displayName || device.name) : '';
   const devEuiShort = device?.devEui ? device.devEui.toUpperCase() : '';
 
+  const handleDeleteConfirm = async () => {
+    if (!device || !onDelete) return;
+    setDeleteLoading(true);
+    try {
+      await onDelete(device);
+      setShowDeleteConfirm(false);
+      onClose();
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const handleSaveRename = async (name: string, description: string) => {
+    if (!device || !onRename) return;
+    setRenameLoading(true);
+    try {
+      await onRename(device, name, description);
+      setShowEditForm(false);
+    } finally {
+      setRenameLoading(false);
+    }
+  };
+
   return (
     <AnimatePresence>
       {isOpen && device && (
@@ -153,7 +324,7 @@ export function LoRaWANDevicePanel({ device, applicationId, manifolds, onClose, 
 
           {/* Slide-in panel */}
           <motion.div
-            className="fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-card/95 backdrop-blur-xl border-l border-border/50 shadow-2xl overflow-y-auto flex flex-col"
+            className="fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-card/95 backdrop-blur-xl border-l border-border/50 shadow-2xl flex flex-col"
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
@@ -163,7 +334,7 @@ export function LoRaWANDevicePanel({ device, applicationId, manifolds, onClose, 
             <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-purple-400 via-violet-500 to-fuchsia-400" />
 
             {/* ── Header ─────────────────────────────────────────── */}
-            <div className="sticky top-0 z-10 bg-card/95 backdrop-blur-xl border-b border-border/50 px-5 pt-5 pb-4">
+            <div className="shrink-0 bg-card/95 backdrop-blur-xl border-b border-border/50 px-5 pt-5 pb-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="p-2.5 rounded-xl bg-violet-500/10 border border-violet-500/20 shrink-0">
@@ -176,7 +347,7 @@ export function LoRaWANDevicePanel({ device, applicationId, manifolds, onClose, 
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-1.5 shrink-0">
                   <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
                     device.isOnline
                       ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25'
@@ -187,6 +358,28 @@ export function LoRaWANDevicePanel({ device, applicationId, manifolds, onClose, 
                       : <><WifiOff className="w-3 h-3" /> Offline</>
                     }
                   </span>
+                  {onRename && (
+                    <button
+                      onClick={() => setShowEditForm((v) => !v)}
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        showEditForm
+                          ? 'text-violet-400 bg-violet-500/10'
+                          : 'text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10'
+                      }`}
+                      title="Edit device name"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                  )}
+                  {onDelete && (
+                    <button
+                      onClick={() => setShowDeleteConfirm(true)}
+                      className="p-1.5 rounded-lg text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      title="Delete device"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                   <button
                     onClick={onClose}
                     className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
@@ -197,8 +390,21 @@ export function LoRaWANDevicePanel({ device, applicationId, manifolds, onClose, 
               </div>
             </div>
 
+            {/* ── Inline Edit Form ────────────────────────────────── */}
+            <AnimatePresence>
+              {showEditForm && (
+                <InlineEditForm
+                  initialName={displayName}
+                  initialDescription={device.description || ''}
+                  onSave={handleSaveRename}
+                  onCancel={() => setShowEditForm(false)}
+                  loading={renameLoading}
+                />
+              )}
+            </AnimatePresence>
+
             {/* ── Body ───────────────────────────────────────────── */}
-            <div className="flex-1 px-5 py-4 space-y-5">
+            <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-5">
 
               {/* Metrics Grid */}
               <div className="grid grid-cols-2 gap-2.5">
@@ -235,9 +441,48 @@ export function LoRaWANDevicePanel({ device, applicationId, manifolds, onClose, 
                 {device.joinEui && <KvRow label="JoinEUI" value={device.joinEui.toUpperCase()} mono />}
                 {device.devAddr && <KvRow label="DevAddr" value={device.devAddr} mono />}
                 <KvRow label="Application" value={device.applicationId} />
-                <KvRow label="Last Seen" value={formatRelative(device.lastSeen)} />
-                {device.connectedSince && (
-                  <KvRow label="Connected Since" value={formatRelative(device.connectedSince)} />
+                {device.description && <KvRow label="Description" value={device.description} />}
+                <KvRow
+                  label="Last Uplink"
+                  value={device.lastSeen ? formatRelative(device.lastSeen) : 'Never'}
+                />
+                {device.isOnline && device.connectedSince ? (
+                  <div className="flex items-center justify-between py-0.5">
+                    <span className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                      <LogIn className="w-3 h-3 text-emerald-400" />
+                      Connected Since
+                    </span>
+                    <span className="text-[11px] font-medium text-emerald-400">
+                      {formatRelative(device.connectedSince)}
+                      <span className="text-[10px] text-muted-foreground ml-1">
+                        ({new Date(device.connectedSince).toLocaleString()})
+                      </span>
+                    </span>
+                  </div>
+                ) : device.connectedSince ? (
+                  <div className="flex items-center justify-between py-0.5">
+                    <span className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                      <LogIn className="w-3 h-3 text-muted-foreground/50" />
+                      Last Connected
+                    </span>
+                    <span className="text-[11px] font-medium text-muted-foreground">
+                      {formatRelative(device.connectedSince)}
+                    </span>
+                  </div>
+                ) : null}
+                {!device.isOnline && device.disconnectedAt && (
+                  <div className="flex items-center justify-between py-0.5">
+                    <span className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                      <LogOut className="w-3 h-3 text-slate-400" />
+                      Went Offline
+                    </span>
+                    <span className="text-[11px] font-medium text-slate-400">
+                      {formatRelative(device.disconnectedAt)}
+                      <span className="text-[10px] text-muted-foreground ml-1">
+                        ({new Date(device.disconnectedAt).toLocaleString()})
+                      </span>
+                    </span>
+                  </div>
                 )}
               </div>
 
@@ -304,9 +549,8 @@ export function LoRaWANDevicePanel({ device, applicationId, manifolds, onClose, 
                   Manifold Navigation
                 </div>
                 <div className="space-y-2">
-                  {/* All Manifolds link */}
                   <a
-                    href="/manifolds"
+                    href="/devices"
                     className="flex items-center justify-between w-full px-3.5 py-2.5 rounded-xl border border-border/50 bg-muted/20 hover:bg-muted/40 hover:border-brand-500/30 transition-all group"
                   >
                     <div className="flex items-center gap-2.5">
@@ -314,14 +558,13 @@ export function LoRaWANDevicePanel({ device, applicationId, manifolds, onClose, 
                         <LayoutDashboard className="w-3.5 h-3.5 text-brand-400" />
                       </div>
                       <div>
-                        <div className="text-sm font-medium">All Manifolds</div>
-                        <div className="text-[10px] text-muted-foreground">View all irrigation manifolds</div>
+                        <div className="text-sm font-medium">All Devices</div>
+                        <div className="text-[10px] text-muted-foreground">View all network devices</div>
                       </div>
                     </div>
                     <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-brand-400 group-hover:translate-x-0.5 transition-all" />
                   </a>
 
-                  {/* Individual manifold links */}
                   {manifolds.length > 0 && (
                     <div className="space-y-1.5">
                       {manifolds.slice(0, 5).map((m) => (
@@ -341,8 +584,8 @@ export function LoRaWANDevicePanel({ device, applicationId, manifolds, onClose, 
                         </a>
                       ))}
                       {manifolds.length > 5 && (
-                        <a href="/manifolds" className="block text-center text-xs text-muted-foreground hover:text-brand-400 py-1 transition-colors">
-                          +{manifolds.length - 5} more manifolds →
+                        <a href="/devices" className="block text-center text-xs text-muted-foreground hover:text-brand-400 py-1 transition-colors">
+                          +{manifolds.length - 5} more →
                         </a>
                       )}
                     </div>
@@ -378,7 +621,7 @@ export function LoRaWANDevicePanel({ device, applicationId, manifolds, onClose, 
             </div>
 
             {/* ── Footer ─────────────────────────────────────────── */}
-            <div className="sticky bottom-0 bg-card/95 backdrop-blur-xl border-t border-border/50 px-5 py-4">
+            <div className="shrink-0 bg-card/95 backdrop-blur-xl border-t border-border/50 px-5 py-4">
               <div className="flex gap-2.5">
                 <button
                   onClick={onOpenInTTN}
@@ -396,6 +639,18 @@ export function LoRaWANDevicePanel({ device, applicationId, manifolds, onClose, 
               </div>
             </div>
           </motion.div>
+
+          {/* Delete Confirm Dialog */}
+          <AnimatePresence>
+            {showDeleteConfirm && (
+              <DeleteConfirmDialog
+                deviceName={displayName}
+                onConfirm={handleDeleteConfirm}
+                onCancel={() => setShowDeleteConfirm(false)}
+                loading={deleteLoading}
+              />
+            )}
+          </AnimatePresence>
         </>
       )}
     </AnimatePresence>

@@ -12,6 +12,9 @@ interface Alarm {
   acknowledgedAt?: string;
   resolved?: boolean;
   resolvedAt?: string;
+  alarmType?: 'COMM_LOSS' | 'LOW_PRESSURE' | 'HIGH_PRESSURE' | 'VALVE_FAULT' |
+              'IO_FAULT' | 'DEVICE_OFFLINE' | 'BATTERY_LOW' | 'SENSOR_FAULT' |
+              'THRESHOLD_BREACH' | 'TAMPER' | 'MANUAL';
 }
 
 interface Schedule {
@@ -551,15 +554,11 @@ export const resolveAlarm = createAsyncThunk(
     { getState }
   ) => {
     const state = getState() as { auth: { token: string } };
-    // Best-effort call — backend may not support this endpoint yet
-    try {
-      await fetch(API_ENDPOINTS.VALVE_ALARM_RESOLVE(valveId, alarmId), {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${getToken(state)}` },
-      });
-    } catch {
-      // Optimistic UI update regardless
-    }
+    const response = await fetch(API_ENDPOINTS.VALVE_ALARM_RESOLVE(valveId, alarmId), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getToken(state)}` },
+    });
+    if (!response.ok) throw new Error('Failed to resolve alarm');
     return { valveId, alarmId };
   }
 );
@@ -572,7 +571,7 @@ export const updateValve = createAsyncThunk(
   ) => {
     const state = getState() as { auth: { token: string } };
     const response = await fetch(API_ENDPOINTS.VALVE_DETAIL(valveId), {
-      method: 'PATCH',
+      method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${getToken(state)}`,

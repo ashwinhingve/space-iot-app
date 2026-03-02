@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useMemo, useCallback, useRef, Suspense } from 'react';
+import React, { useEffect, useState, useCallback, useRef, Suspense } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -16,12 +16,15 @@ import {
   syncTTNDevices,
   fetchTTNDevices,
   fetchTTNLogs,
-  fetchTTNStats,
   fetchTTNGateways,
   fetchTTNGatewayStats,
   sendTTNDownlink,
   updateTTNApiKey,
   updateTTNDevice,
+  createTTNDevice,
+  deleteTTNDevice,
+  updateTTNGateway,
+  deleteTTNGateway,
   setSelectedApplication,
   addUplink,
   addLogEntry,
@@ -30,29 +33,13 @@ import {
   clearError,
   clearSuccess,
   TTNDevice,
+  TTNGateway,
   TTNUplink,
   TTNDownlink,
   TTNLogEntry,
 } from '@/store/slices/ttnSlice';
 import { API_ENDPOINTS } from '@/lib/config';
 import { createAuthenticatedSocket } from '@/lib/socket';
-import {
-  AreaChart,
-  Area,
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts';
 import {
   Radio,
   Plus,
@@ -62,7 +49,6 @@ import {
   ArrowUpCircle,
   ArrowDownCircle,
   Activity,
-  Signal,
   Send,
   X,
   CheckCircle,
@@ -71,7 +57,6 @@ import {
   ChevronDown,
   ChevronUp,
   Server,
-  BarChart3,
   MapPin,
   KeyRound,
   ShieldCheck,
@@ -84,9 +69,10 @@ import {
   Check,
   Calendar,
   Edit2,
+  Pencil,
 } from 'lucide-react';
 
-type TabType = 'overview' | 'devices' | 'gateways' | 'logs';
+type TabType = 'devices' | 'gateways' | 'logs';
 
 // RSSI quality indicator helper
 function getRssiColor(rssi: number): string {
@@ -105,51 +91,6 @@ function isEffectivelyOnline(lastSeen?: string | null): boolean {
 
 
 
-const STATUS_COLORS: Record<string, string> = {
-  PENDING: '#f59e0b',
-  SCHEDULED: '#3b82f6',
-  SENT: '#10b981',
-  ACKNOWLEDGED: '#06b6d4',
-  FAILED: '#ef4444',
-};
-
-// Reusable chart wrapper with download controls
-function ChartCard({
-  title,
-  icon,
-  onDownload,
-  children,
-}: {
-  title: string;
-  icon: React.ReactNode;
-  onDownload: (fmt: 'csv' | 'json') => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="p-6 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-base font-semibold flex items-center gap-2">{icon}{title}</h3>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => onDownload('csv')}
-            className="px-2 py-1 rounded-lg text-xs bg-secondary/50 hover:bg-secondary/80 text-muted-foreground transition-all flex items-center gap-1"
-            title="Export CSV"
-          >
-            <Download className="h-3 w-3" />CSV
-          </button>
-          <button
-            onClick={() => onDownload('json')}
-            className="px-2 py-1 rounded-lg text-xs bg-secondary/50 hover:bg-secondary/80 text-muted-foreground transition-all flex items-center gap-1"
-            title="Export JSON"
-          >
-            <Download className="h-3 w-3" />JSON
-          </button>
-        </div>
-      </div>
-      {children}
-    </div>
-  );
-}
 
 // ─── URL params handler (needs Suspense boundary) ─────────────────────────────
 
@@ -174,14 +115,13 @@ function SearchParamsHandler({
 
 export default function TTNPage() {
   const dispatch = useDispatch<AppDispatch>();
-  const [activeTab, setActiveTab] = useState<TabType>('overview');
+  const [activeTab, setActiveTab] = useState<TabType>('devices');
   const [showAddApp, setShowAddApp] = useState(false);
   const [showDownlinkModal, setShowDownlinkModal] = useState(false);
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [selectedDeviceForDownlink, setSelectedDeviceForDownlink] = useState<TTNDevice | null>(null);
   const [newApiKey, setNewApiKey] = useState('');
   const [, setSocket] = useState<Socket | null>(null);
-  const [statsPeriod, setStatsPeriod] = useState('24h');
   const [expandedUplinkId, setExpandedUplinkId] = useState<string | null>(null);
   const [logFilter, setLogFilter] = useState({
     deviceId: 'all',
@@ -193,23 +133,6 @@ export default function TTNPage() {
   const [inlineLogsDevice, setInlineLogsDevice] = useState<TTNDevice | null>(null);
   const [inlineLogsData, setInlineLogsData] = useState<TTNLogEntry[]>([]);
   const [inlineLogsLoading, setInlineLogsLoading] = useState(false);
-  // Overview time-range state
-  const [overviewTimeMode, setOverviewTimeMode] = useState<'preset' | 'custom'>('preset');
-  const [overviewCustomStart, setOverviewCustomStart] = useState('');
-  const [overviewCustomEnd, setOverviewCustomEnd] = useState('');
-  // Graph visibility filter
-  const [showGraphFilter, setShowGraphFilter] = useState(false);
-  const [visibleGraphs, setVisibleGraphs] = useState({
-    messageComparison: true,
-    uplinkActivity: true,
-    downlinkActivity: true,
-    signalQuality: true,
-    sfDistribution: true,
-    gatewayTraffic: true,
-    downlinkStatus: true,
-    hourlyActivity: true,
-    frequencyBand: true,
-  });
   const [copiedPayload, setCopiedPayload] = useState<string | null>(null);
   // LoRaWAN device monitoring state
   const [lorawanMode, setLorawanMode] = useState<'monitoring' | 'control'>('monitoring');
@@ -226,6 +149,25 @@ export default function TTNPage() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [downloadError, setDownloadError] = useState('');
   const [downloading, setDownloading] = useState(false);
+  // Create Device modal
+  const [showCreateDevice, setShowCreateDevice] = useState(false);
+  const [createDeviceForm, setCreateDeviceForm] = useState({
+    deviceId: '',
+    name: '',
+    description: '',
+    devEui: '',
+    joinEui: '',
+    appKey: '',
+    lorawanVersion: 'MAC_V1_0_2',
+    frequencyPlanId: 'EU_863_870_TTN',
+  });
+  // Delete device confirmation
+  const [deleteDeviceConfirm, setDeleteDeviceConfirm] = useState<TTNDevice | null>(null);
+  // Gateway rename state
+  const [gatewayEditId, setGatewayEditId] = useState<string | null>(null);
+  const [gatewayEditValue, setGatewayEditValue] = useState('');
+  // Gateway delete confirmation
+  const [gatewayDeleteConfirm, setGatewayDeleteConfirm] = useState<TTNGateway | null>(null);
   // URL params: highlighted device from /devices page navigation
   const [highlightedDeviceId, setHighlightedDeviceId] = useState<string | null>(null);
   const deviceCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -254,7 +196,6 @@ export default function TTNPage() {
     gateways,
     logs,
     logsTotal,
-    stats,
     loading,
     syncLoading,
     logsLoading,
@@ -298,19 +239,10 @@ export default function TTNPage() {
   const refreshAppData = useCallback(() => {
     if (selectedApplication) {
       dispatch(fetchTTNDevices(selectedApplication.applicationId));
-      if (overviewTimeMode === 'custom' && overviewCustomStart) {
-        dispatch(fetchTTNStats({
-          applicationId: selectedApplication.applicationId,
-          startDate: new Date(overviewCustomStart).toISOString(),
-          endDate: overviewCustomEnd ? new Date(overviewCustomEnd).toISOString() : undefined,
-        }));
-      } else {
-        dispatch(fetchTTNStats({ applicationId: selectedApplication.applicationId, period: statsPeriod }));
-      }
       dispatch(fetchTTNGateways(selectedApplication.applicationId));
       dispatch(fetchTTNGatewayStats(selectedApplication.applicationId));
     }
-  }, [selectedApplication, dispatch, statsPeriod, overviewTimeMode, overviewCustomStart, overviewCustomEnd]);
+  }, [selectedApplication, dispatch]);
 
   // Setup Socket.io for real-time updates
   useEffect(() => {
@@ -464,116 +396,6 @@ export default function TTNPage() {
     }
   }, [error, success, dispatch]);
 
-  // Chart data derived from stats
-  const uplinkChartData = useMemo(() => {
-    if (!stats?.uplinkTimeSeries) return [];
-    return stats.uplinkTimeSeries.map((item) => ({
-      time: item._id.includes(' ') ? item._id.split(' ')[1] : item._id.split('T')[0],
-      uplinks: item.count,
-      avgRssi: Math.round(item.avgRssi * 10) / 10,
-      avgSnr: Math.round(item.avgSnr * 10) / 10,
-    }));
-  }, [stats]);
-
-  const downlinkChartData = useMemo(() => {
-    if (!stats?.downlinkTimeSeries) return [];
-    return stats.downlinkTimeSeries.map((item) => ({
-      time: item._id.includes(' ') ? item._id.split(' ')[1] : item._id.split('T')[0],
-      downlinks: item.count,
-    }));
-  }, [stats]);
-
-  const sfChartData = useMemo(() => {
-    if (!stats?.topDevices) return [];
-    const DEVICE_COLORS = ['#10b981', '#06b6d4', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#f97316', '#a855f7'];
-    return stats.topDevices.map((item, index) => {
-      const device = devices.find((d) => d.deviceId === item._id);
-      return {
-        name: device?.name || item._id,
-        count: item.uplinkCount,
-        fill: DEVICE_COLORS[index % DEVICE_COLORS.length],
-      };
-    });
-  }, [stats, devices]);
-
-  const statusChartData = useMemo(() => {
-    if (!stats?.downlinkStatusBreakdown) return [];
-    return stats.downlinkStatusBreakdown.map((item) => ({
-      name: item._id,
-      value: item.count,
-      fill: STATUS_COLORS[item._id] || '#6b7280',
-    }));
-  }, [stats]);
-
-  const gatewayChartData = useMemo(() => {
-    if (!stats?.gatewayTraffic) return [];
-    return stats.gatewayTraffic.map((item) => ({
-      gateway: item._id.length > 20 ? item._id.slice(0, 18) + '…' : item._id,
-      fullId: item._id,
-      count: item.count,
-      avgRssi: Math.round(item.avgRssi * 10) / 10,
-      avgSnr: Math.round(item.avgSnr * 10) / 10,
-    }));
-  }, [stats]);
-
-  const hourlyData = useMemo(() => {
-    if (!stats?.hourlyHeatmap) return [];
-    // Fill all 24 hours
-    const map = new Map(stats.hourlyHeatmap.map((h) => [h._id, h.count]));
-    return Array.from({ length: 24 }, (_, i) => ({
-      hour: `${i.toString().padStart(2, '0')}:00`,
-      count: map.get(i) || 0,
-    }));
-  }, [stats]);
-
-  const frequencyData = useMemo(() => {
-    if (!stats?.frequencyDistribution) return [];
-    return stats.frequencyDistribution.map((item) => ({
-      freq: `${(item._id / 1000000).toFixed(1)}`,
-      count: item.count,
-    }));
-  }, [stats]);
-
-  // New: combined uplink+downlink comparison data
-  const messageComparisonData = useMemo(() => {
-    if (!stats) return [];
-    const uplinkMap = new Map(stats.uplinkTimeSeries.map((u) => [u._id, u.count]));
-    const downlinkMap = new Map(stats.downlinkTimeSeries.map((d) => [d._id, d.count]));
-    const allKeys = [...new Set([...uplinkMap.keys(), ...downlinkMap.keys()])].sort();
-    return allKeys.map((key) => ({
-      time: key.includes(' ') ? key.split(' ')[1] : key.split('T')[0],
-      uplinks: uplinkMap.get(key) || 0,
-      downlinks: downlinkMap.get(key) || 0,
-    }));
-  }, [stats]);
-
-  // Chart data download helper
-  const downloadChartData = (data: unknown[], filename: string, fmt: 'csv' | 'json') => {
-    if (!data.length) return;
-    let content: string;
-    let mimeType: string;
-    let ext: string;
-    if (fmt === 'json') {
-      content = JSON.stringify(data, null, 2);
-      mimeType = 'application/json';
-      ext = 'json';
-    } else {
-      const keys = Object.keys(data[0] as Record<string, unknown>);
-      const rows = (data as Record<string, unknown>[]).map((row) =>
-        keys.map((k) => JSON.stringify(row[k] ?? '')).join(',')
-      );
-      content = [keys.join(','), ...rows].join('\n');
-      mimeType = 'text/csv';
-      ext = 'csv';
-    }
-    const blob = new Blob([content], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${filename}.${ext}`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
 
   const handleCreateApp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -633,10 +455,46 @@ export default function TTNPage() {
     setEditingDeviceId(null);
   };
 
+  const handleCreateDevice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedApplication) return;
+    const result = await dispatch(createTTNDevice({
+      applicationId: selectedApplication.applicationId,
+      ...createDeviceForm,
+    }));
+    if (!result.type.endsWith('rejected')) {
+      setShowCreateDevice(false);
+      setCreateDeviceForm({ deviceId: '', name: '', description: '', devEui: '', joinEui: '', appKey: '', lorawanVersion: 'MAC_V1_0_2', frequencyPlanId: 'EU_863_870_TTN' });
+    }
+  };
+
+  const handleDeleteDevice = async (device: TTNDevice) => {
+    if (!selectedApplication) return;
+    await dispatch(deleteTTNDevice({ applicationId: selectedApplication.applicationId, deviceId: device.deviceId }));
+    setDeleteDeviceConfirm(null);
+  };
+
+  const handleSaveGatewayName = async (gw: TTNGateway) => {
+    if (!selectedApplication || !gatewayEditValue.trim()) return;
+    await dispatch(updateTTNGateway({
+      applicationId: selectedApplication.applicationId,
+      gatewayId: gw.gatewayId,
+      name: gatewayEditValue.trim(),
+    }));
+    setGatewayEditId(null);
+  };
+
+  const handleDeleteGateway = async (gw: TTNGateway) => {
+    if (!selectedApplication) return;
+    await dispatch(deleteTTNGateway({ applicationId: selectedApplication.applicationId, gatewayId: gw.gatewayId }));
+    setGatewayDeleteConfirm(null);
+  };
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleString();
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const formatRelativeTime = (dateString: string) => {
     const diff = Date.now() - new Date(dateString).getTime();
     if (diff < 60000) return 'Just now';
@@ -764,6 +622,7 @@ export default function TTNPage() {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const navigateToLogsForDevice = (deviceId: string) => {
     setLogFilter({ ...logFilter, deviceId });
     setActiveTab('logs');
@@ -808,7 +667,6 @@ export default function TTNPage() {
   }, [selectedApplication, inlineLogsDevice]);
 
   const tabs: { key: TabType; label: string; icon: React.ReactNode }[] = [
-    { key: 'overview', label: 'Overview', icon: <BarChart3 className="h-4 w-4" /> },
     { key: 'devices', label: 'Devices', icon: <Radio className="h-4 w-4" /> },
     { key: 'gateways', label: 'Gateways', icon: <Server className="h-4 w-4" /> },
     { key: 'logs', label: 'Live Logs', icon: <Activity className="h-4 w-4" /> },
@@ -993,477 +851,6 @@ export default function TTNPage() {
 
               {/* Content */}
               <AnimatePresence mode="wait">
-                {/* ==================== OVERVIEW TAB ==================== */}
-                {activeTab === 'overview' && (
-                  <motion.div
-                    key="overview"
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -20 }}
-                    className="space-y-6"
-                  >
-                    {/* Controls: period + custom range + graph filter */}
-                    <div className="p-4 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
-                      <div className="flex flex-wrap items-center gap-3">
-                        {/* Preset buttons */}
-                        <div className="flex gap-1">
-                          {(['1h', '24h', '7d', '30d'] as const).map((p) => (
-                            <button
-                              key={p}
-                              onClick={() => { setOverviewTimeMode('preset'); setStatsPeriod(p); }}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                                overviewTimeMode === 'preset' && statsPeriod === p
-                                  ? 'bg-green-500/20 text-green-500 border border-green-500/30'
-                                  : 'bg-secondary/50 hover:bg-secondary/80 text-muted-foreground'
-                              }`}
-                            >{p}</button>
-                          ))}
-                          <button
-                            onClick={() => setOverviewTimeMode('custom')}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1 ${
-                              overviewTimeMode === 'custom'
-                                ? 'bg-green-500/20 text-green-500 border border-green-500/30'
-                                : 'bg-secondary/50 hover:bg-secondary/80 text-muted-foreground'
-                            }`}
-                          >
-                            <Calendar className="h-3 w-3" />Custom
-                          </button>
-                        </div>
-                        {/* Custom date inputs */}
-                        {overviewTimeMode === 'custom' && (
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <input type="datetime-local" value={overviewCustomStart} onChange={(e) => setOverviewCustomStart(e.target.value)}
-                              className="px-2 py-1.5 rounded-lg text-xs bg-secondary/50 border border-border/50" />
-                            <span className="text-xs text-muted-foreground">to</span>
-                            <input type="datetime-local" value={overviewCustomEnd} onChange={(e) => setOverviewCustomEnd(e.target.value)}
-                              className="px-2 py-1.5 rounded-lg text-xs bg-secondary/50 border border-border/50" />
-                            <button
-                              onClick={() => { if (overviewCustomStart && selectedApplication) refreshAppData(); }}
-                              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-500/20 text-green-500 border border-green-500/30 hover:bg-green-500/30 transition-all"
-                            >Apply</button>
-                          </div>
-                        )}
-                        {/* Graph filter toggle */}
-                        <button
-                          onClick={() => setShowGraphFilter((v) => !v)}
-                          className={`ml-auto px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
-                            showGraphFilter
-                              ? 'bg-green-500/20 text-green-500 border border-green-500/30'
-                              : 'bg-secondary/50 hover:bg-secondary/80 text-muted-foreground'
-                          }`}
-                        >
-                          <Filter className="h-3.5 w-3.5" />
-                          Graphs ({Object.values(visibleGraphs).filter(Boolean).length}/{Object.values(visibleGraphs).length})
-                        </button>
-                      </div>
-                      {/* Graph visibility checkboxes */}
-                      {showGraphFilter && (
-                        <div className="mt-3 pt-3 border-t border-border/50 flex flex-wrap gap-2">
-                          {([
-                            { key: 'messageComparison', label: 'Message Volume' },
-                            { key: 'uplinkActivity',    label: 'Uplink Activity' },
-                            { key: 'downlinkActivity',  label: 'Downlink Activity' },
-                            { key: 'signalQuality',     label: 'Signal Quality' },
-                            { key: 'sfDistribution',    label: 'Uplinks by Device' },
-                            { key: 'gatewayTraffic',    label: 'Gateway Traffic' },
-                            { key: 'downlinkStatus',    label: 'Downlink Status' },
-                            { key: 'hourlyActivity',    label: 'Hourly Activity' },
-                            { key: 'frequencyBand',     label: 'Frequency Band' },
-                          ] as const).map(({ key, label }) => (
-                            <button
-                              key={key}
-                              onClick={() => setVisibleGraphs((v) => ({ ...v, [key]: !v[key] }))}
-                              className={`px-3 py-1 rounded-lg text-xs font-medium transition-all border ${
-                                visibleGraphs[key]
-                                  ? 'bg-green-500/15 text-green-500 border-green-500/30'
-                                  : 'bg-secondary/30 text-muted-foreground border-border/30 opacity-50'
-                              }`}
-                            >{label}</button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Summary stat cards — only Total Devices + Total Gateways */}
-                    {stats && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                          className="p-4 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
-                          <div className="flex items-center gap-3 mb-2">
-                            <div className="p-2 rounded-lg bg-blue-500/10"><Radio className="h-5 w-5 text-blue-500" /></div>
-                            <div>
-                              <p className="text-2xl font-bold">{stats.summary.totalDevices}</p>
-                              <p className="text-xs text-muted-foreground">Total Devices</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2 text-xs">
-                            <span className="text-green-500">{stats.summary.onlineDevices} online</span>
-                            <span className="text-muted-foreground">/</span>
-                            <span className="text-slate-500">{stats.summary.offlineDevices} offline</span>
-                          </div>
-                          {stats.summary.totalDevices > 0 && (
-                            <div className="mt-2 h-1.5 rounded-full bg-secondary/50 overflow-hidden">
-                              <div className="h-full bg-green-500 rounded-full" style={{ width: `${(stats.summary.onlineDevices / stats.summary.totalDevices) * 100}%` }} />
-                            </div>
-                          )}
-                        </motion.div>
-
-                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
-                          className="p-4 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
-                          <div className="flex items-center gap-3 mb-2">
-                            <div className="p-2 rounded-lg bg-cyan-500/10"><Server className="h-5 w-5 text-cyan-500" /></div>
-                            <div>
-                              <p className="text-2xl font-bold">{stats.summary.totalGateways}</p>
-                              <p className="text-xs text-muted-foreground">Total Gateways</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2 text-xs">
-                            <span className="text-green-500">{stats.summary.onlineGateways} online</span>
-                            <span className="text-muted-foreground">/</span>
-                            <span className="text-slate-500">{(stats.summary.totalGateways ?? 0) - (stats.summary.onlineGateways ?? 0)} offline</span>
-                          </div>
-                          {(stats.summary.totalGateways ?? 0) > 0 && (
-                            <div className="mt-2 h-1.5 rounded-full bg-secondary/50 overflow-hidden">
-                              <div className="h-full bg-cyan-500 rounded-full" style={{ width: `${((stats.summary.onlineGateways ?? 0) / (stats.summary.totalGateways ?? 1)) * 100}%` }} />
-                            </div>
-                          )}
-                        </motion.div>
-                      </div>
-                    )}
-
-                    {/* NEW: Message Volume Comparison — uplinks + downlinks on same chart */}
-                    {visibleGraphs.messageComparison && (
-                      <ChartCard
-                        title="Message Volume"
-                        icon={<Activity className="h-5 w-5 text-green-500" />}
-                        onDownload={(fmt) => downloadChartData(messageComparisonData, 'message-volume', fmt)}
-                      >
-                        {messageComparisonData.length > 0 ? (
-                          <ResponsiveContainer width="100%" height={250}>
-                            <AreaChart data={messageComparisonData}>
-                              <defs>
-                                <linearGradient id="uplinkMsgGrad" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                                </linearGradient>
-                                <linearGradient id="downlinkMsgGrad" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                                </linearGradient>
-                              </defs>
-                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                              <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#888' }} />
-                              <YAxis tick={{ fontSize: 11, fill: '#888' }} />
-                              <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '8px', color: '#fff' }} />
-                              <Legend />
-                              <Area type="monotone" dataKey="uplinks" stroke="#10b981" strokeWidth={2} fill="url(#uplinkMsgGrad)" name="Uplinks" />
-                              <Area type="monotone" dataKey="downlinks" stroke="#3b82f6" strokeWidth={2} fill="url(#downlinkMsgGrad)" name="Downlinks" />
-                            </AreaChart>
-                          </ResponsiveContainer>
-                        ) : (
-                          <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">No message data for this period</div>
-                        )}
-                      </ChartCard>
-                    )}
-
-                    {/* Row: Uplink Activity + Downlink Activity */}
-                    {(visibleGraphs.uplinkActivity || visibleGraphs.downlinkActivity) && (
-                      <div className={`grid grid-cols-1 ${visibleGraphs.uplinkActivity && visibleGraphs.downlinkActivity ? 'lg:grid-cols-2' : ''} gap-6`}>
-                        {visibleGraphs.uplinkActivity && (
-                          <ChartCard title="Uplink Activity" icon={<ArrowUpCircle className="h-5 w-5 text-green-500" />}
-                            onDownload={(fmt) => downloadChartData(uplinkChartData, 'uplink-activity', fmt)}>
-                            {uplinkChartData.length > 0 ? (
-                              <ResponsiveContainer width="100%" height={250}>
-                                <AreaChart data={uplinkChartData}>
-                                  <defs>
-                                    <linearGradient id="uplinkGradient" x1="0" y1="0" x2="0" y2="1">
-                                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                                    </linearGradient>
-                                  </defs>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                                  <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#888' }} />
-                                  <YAxis tick={{ fontSize: 11, fill: '#888' }} />
-                                  <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '8px', color: '#fff' }} />
-                                  <Area type="monotone" dataKey="uplinks" stroke="#10b981" strokeWidth={2} fill="url(#uplinkGradient)" />
-                                </AreaChart>
-                              </ResponsiveContainer>
-                            ) : (
-                              <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">No uplink data for this period</div>
-                            )}
-                          </ChartCard>
-                        )}
-                        {visibleGraphs.downlinkActivity && (
-                          <ChartCard title="Downlink Activity" icon={<ArrowDownCircle className="h-5 w-5 text-blue-500" />}
-                            onDownload={(fmt) => downloadChartData(downlinkChartData, 'downlink-activity', fmt)}>
-                            {downlinkChartData.length > 0 ? (
-                              <ResponsiveContainer width="100%" height={250}>
-                                <AreaChart data={downlinkChartData}>
-                                  <defs>
-                                    <linearGradient id="downlinkGradient" x1="0" y1="0" x2="0" y2="1">
-                                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                                    </linearGradient>
-                                  </defs>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                                  <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#888' }} />
-                                  <YAxis tick={{ fontSize: 11, fill: '#888' }} />
-                                  <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: '8px', color: '#fff' }} />
-                                  <Area type="monotone" dataKey="downlinks" stroke="#3b82f6" strokeWidth={2} fill="url(#downlinkGradient)" />
-                                </AreaChart>
-                              </ResponsiveContainer>
-                            ) : (
-                              <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">No downlink data for this period</div>
-                            )}
-                          </ChartCard>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Row: Signal Quality + SF Distribution */}
-                    {(visibleGraphs.signalQuality || visibleGraphs.sfDistribution) && (
-                      <div className={`grid grid-cols-1 ${visibleGraphs.signalQuality && visibleGraphs.sfDistribution ? 'lg:grid-cols-2' : ''} gap-6`}>
-                        {visibleGraphs.signalQuality && (
-                          <ChartCard title="Signal Quality" icon={<Signal className="h-5 w-5 text-purple-500" />}
-                            onDownload={(fmt) => downloadChartData(uplinkChartData, 'signal-quality', fmt)}>
-                            {uplinkChartData.length > 0 ? (
-                              <ResponsiveContainer width="100%" height={250}>
-                                <LineChart data={uplinkChartData}>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                                  <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#888' }} />
-                                  <YAxis tick={{ fontSize: 11, fill: '#888' }} />
-                                  <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(168,85,247,0.3)', borderRadius: '8px', color: '#fff' }} />
-                                  <Legend />
-                                  <Line type="monotone" dataKey="avgRssi" stroke="#a855f7" strokeWidth={2} dot={false} name="Avg RSSI (dBm)" />
-                                  <Line type="monotone" dataKey="avgSnr" stroke="#06b6d4" strokeWidth={2} dot={false} name="Avg SNR (dB)" />
-                                </LineChart>
-                              </ResponsiveContainer>
-                            ) : (
-                              <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">No signal data for this period</div>
-                            )}
-                          </ChartCard>
-                        )}
-                        {visibleGraphs.sfDistribution && (
-                          <ChartCard title="Uplinks by Device" icon={<BarChart3 className="h-5 w-5 text-indigo-500" />}
-                            onDownload={(fmt) => downloadChartData(sfChartData, 'uplinks-by-device', fmt)}>
-                            {sfChartData.length > 0 ? (
-                              <ResponsiveContainer width="100%" height={250}>
-                                <BarChart data={sfChartData}>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#888' }} interval={0} angle={-30} textAnchor="end" height={50} />
-                                  <YAxis tick={{ fontSize: 11, fill: '#888' }} />
-                                  <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '8px', color: '#fff' }} />
-                                  <Bar dataKey="count" name="Uplinks" radius={[4, 4, 0, 0]}>
-                                    {sfChartData.map((entry, index) => (
-                                      <Cell key={`dev-${index}`} fill={entry.fill} />
-                                    ))}
-                                  </Bar>
-                                </BarChart>
-                              </ResponsiveContainer>
-                            ) : (
-                              <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">No device data for this period</div>
-                            )}
-                          </ChartCard>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Row: Gateway Traffic + Downlink Status */}
-                    {(visibleGraphs.gatewayTraffic || visibleGraphs.downlinkStatus) && (
-                      <div className={`grid grid-cols-1 ${visibleGraphs.gatewayTraffic && visibleGraphs.downlinkStatus ? 'lg:grid-cols-2' : ''} gap-6`}>
-                        {visibleGraphs.gatewayTraffic && (
-                          <ChartCard title="Gateway Traffic" icon={<Server className="h-5 w-5 text-cyan-500" />}
-                            onDownload={(fmt) => downloadChartData(gatewayChartData.map((g) => ({ gateway: g.fullId, uplinks: g.count, avgRssi: g.avgRssi, avgSnr: g.avgSnr })), 'gateway-traffic', fmt)}>
-                            {gatewayChartData.length > 0 ? (
-                              <ResponsiveContainer width="100%" height={250}>
-                                <BarChart data={gatewayChartData} layout="vertical">
-                                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                                  <XAxis type="number" tick={{ fontSize: 11, fill: '#888' }} />
-                                  <YAxis dataKey="gateway" type="category" tick={{ fontSize: 10, fill: '#888' }} width={120} />
-                                  <Tooltip
-                                    contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(6,182,212,0.3)', borderRadius: '8px', color: '#fff' }}
-                                    labelFormatter={(label: string) => {
-                                      const item = gatewayChartData.find((g) => g.gateway === label);
-                                      return item ? `${item.fullId} | RSSI: ${item.avgRssi} dBm | SNR: ${item.avgSnr} dB` : label;
-                                    }}
-                                  />
-                                  <Bar dataKey="count" name="Uplinks" fill="#06b6d4" radius={[0, 4, 4, 0]} />
-                                </BarChart>
-                              </ResponsiveContainer>
-                            ) : (
-                              <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">No gateway traffic data</div>
-                            )}
-                          </ChartCard>
-                        )}
-                        {visibleGraphs.downlinkStatus && (
-                          <ChartCard title="Downlink Status Breakdown" icon={<ArrowDownCircle className="h-5 w-5 text-orange-500" />}
-                            onDownload={(fmt) => downloadChartData(statusChartData.map((s) => ({ status: s.name, count: s.value })), 'downlink-status', fmt)}>
-                            {statusChartData.length > 0 ? (
-                              <ResponsiveContainer width="100%" height={250}>
-                                <PieChart>
-                                  <Pie data={statusChartData} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={3} dataKey="value" nameKey="name">
-                                    {statusChartData.map((entry, index) => (
-                                      <Cell key={`status-${index}`} fill={entry.fill} />
-                                    ))}
-                                  </Pie>
-                                  <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(249,115,22,0.3)', borderRadius: '8px', color: '#fff' }} />
-                                  <Legend />
-                                </PieChart>
-                              </ResponsiveContainer>
-                            ) : (
-                              <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">No downlink status data</div>
-                            )}
-                          </ChartCard>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Row: Hourly Activity + Frequency Band */}
-                    {(visibleGraphs.hourlyActivity || visibleGraphs.frequencyBand) && (
-                      <div className={`grid grid-cols-1 ${visibleGraphs.hourlyActivity && visibleGraphs.frequencyBand ? 'lg:grid-cols-2' : ''} gap-6`}>
-                        {visibleGraphs.hourlyActivity && (
-                          <ChartCard title="Hourly Activity Pattern" icon={<Calendar className="h-5 w-5 text-amber-500" />}
-                            onDownload={(fmt) => downloadChartData(hourlyData, 'hourly-activity', fmt)}>
-                            {hourlyData.length > 0 ? (
-                              <ResponsiveContainer width="100%" height={250}>
-                                <BarChart data={hourlyData}>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                                  <XAxis dataKey="hour" tick={{ fontSize: 10, fill: '#888' }} interval={1} />
-                                  <YAxis tick={{ fontSize: 11, fill: '#888' }} />
-                                  <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: '8px', color: '#fff' }} />
-                                  <Bar dataKey="count" name="Messages" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-                                </BarChart>
-                              </ResponsiveContainer>
-                            ) : (
-                              <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">No hourly data for this period</div>
-                            )}
-                          </ChartCard>
-                        )}
-                        {visibleGraphs.frequencyBand && (
-                          <ChartCard title="Frequency Band Usage (MHz)" icon={<Wifi className="h-5 w-5 text-teal-500" />}
-                            onDownload={(fmt) => downloadChartData(frequencyData, 'frequency-band', fmt)}>
-                            {frequencyData.length > 0 ? (
-                              <ResponsiveContainer width="100%" height={250}>
-                                <BarChart data={frequencyData}>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                                  <XAxis dataKey="freq" tick={{ fontSize: 10, fill: '#888' }} />
-                                  <YAxis tick={{ fontSize: 11, fill: '#888' }} />
-                                  <Tooltip contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: '1px solid rgba(20,184,166,0.3)', borderRadius: '8px', color: '#fff' }} />
-                                  <Bar dataKey="count" name="Uplinks" fill="#14b8a6" radius={[4, 4, 0, 0]} />
-                                </BarChart>
-                              </ResponsiveContainer>
-                            ) : (
-                              <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">No frequency data for this period</div>
-                            )}
-                          </ChartCard>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Tables: Top Active Devices + Gateway Performance */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      <div className="p-6 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
-                        <div className="flex items-center justify-between mb-4">
-                          <h3 className="text-base font-semibold flex items-center gap-2">
-                            <Radio className="h-5 w-5 text-green-500" />Top Active Devices
-                          </h3>
-                          <button
-                            onClick={() => downloadChartData(
-                              stats?.topDevices?.map((d) => ({ deviceId: d._id, uplinks: d.uplinkCount, avgRssi: d.avgRssi?.toFixed(1), avgSnr: d.avgSnr?.toFixed(1), lastSeen: d.lastSeen })) || [],
-                              'top-devices', 'csv'
-                            )}
-                            className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors" title="Export CSV"
-                          >
-                            <Download className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                        {stats?.topDevices && stats.topDevices.length > 0 ? (
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                              <thead>
-                                <tr className="text-xs text-muted-foreground border-b border-border/50">
-                                  <th className="text-left py-2 pr-2">#</th>
-                                  <th className="text-left py-2 pr-2">Device ID</th>
-                                  <th className="text-right py-2 pr-2">Uplinks</th>
-                                  <th className="text-right py-2 pr-2">RSSI</th>
-                                  <th className="text-right py-2 pr-2">SNR</th>
-                                  <th className="text-right py-2">Last Seen</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {stats.topDevices.map((device, i) => (
-                                  <tr key={device._id} className="border-b border-border/30 hover:bg-secondary/20 cursor-pointer" onClick={() => navigateToLogsForDevice(device._id)}>
-                                    <td className="py-2 pr-2 text-muted-foreground">{i + 1}</td>
-                                    <td className="py-2 pr-2 font-mono text-xs">{device._id}</td>
-                                    <td className="py-2 pr-2 text-right font-semibold">{device.uplinkCount}</td>
-                                    <td className={`py-2 pr-2 text-right ${getRssiColor(device.avgRssi)}`}>{device.avgRssi?.toFixed(1)}</td>
-                                    <td className="py-2 pr-2 text-right">{device.avgSnr?.toFixed(1)}</td>
-                                    <td className="py-2 text-right text-xs text-muted-foreground">{formatRelativeTime(device.lastSeen)}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        ) : (
-                          <p className="text-muted-foreground text-sm text-center py-4">No device activity yet</p>
-                        )}
-                      </div>
-
-                      <div className="p-6 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50">
-                        <div className="flex items-center justify-between mb-4">
-                          <h3 className="text-base font-semibold flex items-center gap-2">
-                            <Server className="h-5 w-5 text-cyan-500" />Gateway Performance
-                          </h3>
-                          <button
-                            onClick={() => downloadChartData(
-                              gateways.map((gw) => ({ gatewayId: gw.gatewayId, name: gw.name, status: gw.isOnline ? 'Online' : 'Offline', totalUplinks: gw.metrics.totalUplinksSeen, avgRssi: gw.metrics.avgRssi?.toFixed(1), avgSnr: gw.metrics.avgSnr?.toFixed(1), lastSeen: gw.lastSeen })),
-                              'gateway-performance', 'csv'
-                            )}
-                            className="p-1.5 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors" title="Export CSV"
-                          >
-                            <Download className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                        {gateways.length > 0 ? (
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                              <thead>
-                                <tr className="text-xs text-muted-foreground border-b border-border/50">
-                                  <th className="text-left py-2 pr-2">Gateway</th>
-                                  <th className="text-center py-2 pr-2">Status</th>
-                                  <th className="text-right py-2 pr-2">Uplinks</th>
-                                  <th className="text-right py-2 pr-2">RSSI</th>
-                                  <th className="text-right py-2 pr-2">SNR</th>
-                                  <th className="text-right py-2">Last Seen</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {gateways.map((gw) => (
-                                  <tr key={gw._id} className="border-b border-border/30 hover:bg-secondary/20 cursor-pointer" onClick={() => navigateToLogsForGateway(gw.gatewayId)}>
-                                    <td className="py-2 pr-2 font-mono text-xs">{gw.name || gw.gatewayId}</td>
-                                    <td className="py-2 pr-2 text-center">
-                                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${isEffectivelyOnline(gw.lastSeen) ? 'bg-green-500/10 text-green-500' : 'bg-slate-500/10 text-slate-500'}`}>
-                                        <span className={`h-1.5 w-1.5 rounded-full ${isEffectivelyOnline(gw.lastSeen) ? 'bg-green-500' : 'bg-slate-500'}`} />
-                                        {isEffectivelyOnline(gw.lastSeen) ? 'Online' : 'Offline'}
-                                      </span>
-                                    </td>
-                                    <td className="py-2 pr-2 text-right font-semibold">{gw.metrics.totalUplinksSeen}</td>
-                                    <td className={`py-2 pr-2 text-right ${getRssiColor(gw.metrics.avgRssi)}`}>{gw.metrics.avgRssi?.toFixed(1)}</td>
-                                    <td className="py-2 pr-2 text-right">{gw.metrics.avgSnr?.toFixed(1)}</td>
-                                    <td className="py-2 text-right text-xs text-muted-foreground">{formatRelativeTime(gw.lastSeen)}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        ) : (
-                          <p className="text-muted-foreground text-sm text-center py-4">No gateways discovered yet</p>
-                        )}
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-
                                 {/* ==================== DEVICES TAB ==================== */}
                 {activeTab === 'devices' && (
                   <motion.div
@@ -1505,11 +892,18 @@ export default function TTNPage() {
                         </button>
                       </div>
                       {selectedMonitorDevice && (
-                        <span className="ml-auto text-xs text-muted-foreground flex items-center gap-1.5">
+                        <span className="text-xs text-muted-foreground flex items-center gap-1.5">
                           <Activity className="h-3.5 w-3.5" />
                           <span className="font-mono text-foreground">{selectedMonitorDevice.displayName || selectedMonitorDevice.name}</span>
                         </span>
                       )}
+                      <button
+                        onClick={() => setShowCreateDevice(true)}
+                        className="ml-auto px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-500/20 text-violet-400 border border-violet-500/30 hover:bg-violet-500/30 transition-all flex items-center gap-1.5"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Register Device
+                      </button>
                     </div>
 
                     {/* Device Cards */}
@@ -1602,6 +996,12 @@ export default function TTNPage() {
                                 <span className="text-xs text-orange-400/80">{formatDate(device.lastSeen)}</span>
                               </div>
                             )}
+                            {device.lastUplink?.fCnt != null && (
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Last FCnt</span>
+                                <span className="font-mono text-xs">#{device.lastUplink.fCnt}</span>
+                              </div>
+                            )}
                             {device.lastUplink?.gatewayId && (
                               <div className="flex justify-between">
                                 <span className="text-muted-foreground">Gateway</span>
@@ -1610,27 +1010,39 @@ export default function TTNPage() {
                             )}
                           </div>
 
-                          {/* Footer: selection indicator + inline logs link */}
-                          <div className="mt-4 pt-3 border-t border-border/50 flex items-center justify-between">
+                          {/* Footer: selection indicator + actions */}
+                          <div className="mt-4 pt-3 border-t border-border/50 flex items-center justify-between gap-2">
                             <span className={`text-xs font-medium ${
                               selectedMonitorDevice?._id === device._id ? 'text-green-500' : 'text-muted-foreground'
                             }`}>
                               {selectedMonitorDevice?._id === device._id ? '● Monitoring' : 'Click to monitor'}
                             </span>
-                            <button
-                              onClick={e => {
-                                e.stopPropagation();
-                                handleViewDeviceLogs(device);
-                              }}
-                              className={`text-xs transition-colors flex items-center gap-1 ${
-                                inlineLogsDevice?._id === device._id
-                                  ? 'text-green-500'
-                                  : 'text-muted-foreground hover:text-green-500'
-                              }`}
-                            >
-                              <Activity className="h-3 w-3" />
-                              {inlineLogsDevice?._id === device._id ? 'Hide Logs' : 'View Logs'}
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  handleViewDeviceLogs(device);
+                                }}
+                                className={`text-xs transition-colors flex items-center gap-1 ${
+                                  inlineLogsDevice?._id === device._id
+                                    ? 'text-green-500'
+                                    : 'text-muted-foreground hover:text-green-500'
+                                }`}
+                              >
+                                <Activity className="h-3 w-3" />
+                                {inlineLogsDevice?._id === device._id ? 'Hide Logs' : 'Logs'}
+                              </button>
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  setDeleteDeviceConfirm(device);
+                                }}
+                                className="p-1 text-muted-foreground hover:text-red-500 transition-colors"
+                                title="Delete device"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
                           </div>
                         </motion.div>
                       ))}
@@ -1678,6 +1090,7 @@ export default function TTNPage() {
                                     <th className="text-left py-2 pr-3">Time</th>
                                     <th className="text-left py-2 pr-3">Device</th>
                                     <th className="text-left py-2 pr-3">Port</th>
+                                    <th className="text-left py-2 pr-3">FCnt</th>
                                     <th className="text-left py-2 pr-3">Payload</th>
                                     <th className="text-left py-2 pr-3">RSSI / Status</th>
                                     <th className="text-left py-2">Gateway</th>
@@ -1696,6 +1109,9 @@ export default function TTNPage() {
                                         {inlineLogsDevice.displayName || inlineLogsDevice.name || entry.deviceId}
                                       </td>
                                       <td className="py-2 pr-3">{entry.fPort ?? '-'}</td>
+                                      <td className="py-2 pr-3 font-mono text-xs tabular-nums text-muted-foreground">
+                                        {entry._type === 'uplink' && entry.fCnt != null ? `#${entry.fCnt}` : '—'}
+                                      </td>
                                       <td className="py-2 pr-3 font-mono max-w-[100px]">
                                         {(() => {
                                           const payload = entry._type === 'uplink' ? entry.rawPayload || '' : entry.payload || '';
@@ -1804,6 +1220,7 @@ export default function TTNPage() {
                                   <thead>
                                     <tr className="text-muted-foreground border-b border-border/50">
                                       <th className="text-left py-2 pr-3">Time</th>
+                                      <th className="text-left py-2 pr-3">FCnt</th>
                                       <th className="text-left py-2 pr-3">Port</th>
                                       <th className="text-left py-2 pr-3">Payload</th>
                                       <th className="text-left py-2 pr-3">RSSI</th>
@@ -1812,13 +1229,36 @@ export default function TTNPage() {
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-border/30">
-                                    {devicePanelUplinks.map((uplink) => (
+                                    {devicePanelUplinks.map((uplink, idx) => {
+                                      // Detect session boundary: within a session fCnt always
+                                      // increases (uplinks sorted newest-first, so fCnt decreases
+                                      // going down the list). If an older row has a HIGHER fCnt
+                                      // than the row above it, the device rejoined between them.
+                                      const prevUplink = devicePanelUplinks[idx - 1];
+                                      const isBoundary =
+                                        uplink.isSessionStart === true ||
+                                        (prevUplink != null && uplink.fCnt > prevUplink.fCnt);
+                                      return (
                                       <React.Fragment key={uplink._id}>
+                                        {isBoundary && (
+                                          <tr>
+                                            <td colSpan={7} className="px-2 py-1">
+                                              <div className="flex items-center gap-2 text-[10px] font-semibold text-blue-400/80 uppercase tracking-wider">
+                                                <span className="flex-1 border-t border-blue-500/20" />
+                                                ↑ Device Rejoined — New LoRaWAN Session (FCnt Reset)
+                                                <span className="flex-1 border-t border-blue-500/20" />
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        )}
                                         <tr
                                           className="hover:bg-secondary/20 cursor-pointer"
                                           onClick={() => setExpandedUplinkId(expandedUplinkId === uplink._id ? null : uplink._id)}
                                         >
                                           <td className="py-2 pr-3 whitespace-nowrap">{formatDate(uplink.receivedAt)}</td>
+                                          <td className="py-2 pr-3 font-mono text-xs tabular-nums text-muted-foreground">
+                                            #{uplink.fCnt}
+                                          </td>
                                           <td className="py-2 pr-3">{uplink.fPort}</td>
                                           <td className="py-2 pr-3 font-mono max-w-[120px]">
                                             <div className="flex items-center gap-1">
@@ -1845,7 +1285,7 @@ export default function TTNPage() {
                                         </tr>
                                         {expandedUplinkId === uplink._id && uplink.gateways && uplink.gateways.length > 0 && (
                                           <tr>
-                                            <td colSpan={6} className="py-2 px-2 bg-secondary/20">
+                                            <td colSpan={7} className="py-2 px-2 bg-secondary/20">
                                               <div className="flex flex-wrap gap-2">
                                                 {uplink.gateways.map((gw, i) => (
                                                   <div key={i} className="text-xs p-2 rounded-lg bg-secondary/40 border border-border/30">
@@ -1858,7 +1298,8 @@ export default function TTNPage() {
                                           </tr>
                                         )}
                                       </React.Fragment>
-                                    ))}
+                                      );
+                                    })}
                                   </tbody>
                                 </table>
                               </div>
@@ -1956,37 +1397,80 @@ export default function TTNPage() {
                           key={gw._id}
                           initial={{ opacity: 0, scale: 0.95 }}
                           animate={{ opacity: 1, scale: 1 }}
-                          className="p-5 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50 hover:border-emerald-500/30 transition-all cursor-pointer"
-                          onClick={() => navigateToLogsForGateway(gw.gatewayId)}
+                          className="p-5 rounded-xl bg-card/50 backdrop-blur-sm border border-border/50 hover:border-emerald-500/30 transition-all"
                         >
                           <div className="flex items-start justify-between mb-4">
-                            <div className="flex items-center gap-3">
-                              <div className="p-2 rounded-lg bg-emerald-500/10">
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              <div className="p-2 rounded-lg bg-emerald-500/10 shrink-0">
                                 <Server className="h-5 w-5 text-emerald-500" />
                               </div>
-                              <div>
-                                <h4 className="font-semibold text-sm">{gw.name || gw.gatewayId}</h4>
-                                <p className="text-xs font-mono text-muted-foreground">{gw.gatewayId}</p>
+                              <div className="min-w-0 flex-1">
+                                {gatewayEditId === gw._id ? (
+                                  <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                                    <input
+                                      type="text"
+                                      value={gatewayEditValue}
+                                      onChange={e => setGatewayEditValue(e.target.value)}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter') handleSaveGatewayName(gw);
+                                        if (e.key === 'Escape') setGatewayEditId(null);
+                                      }}
+                                      className="px-2 py-0.5 rounded-lg text-sm bg-background/80 border border-emerald-500/40 w-full font-semibold"
+                                      autoFocus
+                                    />
+                                    <button onClick={() => handleSaveGatewayName(gw)} className="p-1 text-emerald-500 hover:text-emerald-400 shrink-0">
+                                      <Check className="h-3.5 w-3.5" />
+                                    </button>
+                                    <button onClick={() => setGatewayEditId(null)} className="p-1 text-muted-foreground hover:text-foreground shrink-0">
+                                      <X className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-1.5">
+                                    <h4 className="font-semibold text-sm truncate">{gw.name || gw.gatewayId}</h4>
+                                    <button
+                                      onClick={() => { setGatewayEditId(gw._id); setGatewayEditValue(gw.name || gw.gatewayId); }}
+                                      className="p-0.5 text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                                      title="Rename gateway"
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                )}
+                                <p className="text-xs font-mono text-muted-foreground truncate">{gw.gatewayId}</p>
                               </div>
                             </div>
-                            <span className={`px-2 py-1 rounded-full text-xs flex items-center gap-1 ${
-                              isEffectivelyOnline(gw.lastSeen) ? 'bg-green-500/10 text-green-500' : 'bg-slate-500/10 text-slate-500'
-                            }`}>
-                              <span className={`h-1.5 w-1.5 rounded-full ${isEffectivelyOnline(gw.lastSeen) ? 'bg-green-500' : 'bg-slate-500'}`} />
-                              {isEffectivelyOnline(gw.lastSeen) ? 'Online' : 'Offline'}
-                            </span>
+                            <div className="flex items-center gap-1.5 ml-2 shrink-0">
+                              <span className={`px-2 py-1 rounded-full text-xs flex items-center gap-1 ${
+                                isEffectivelyOnline(gw.lastSeen) ? 'bg-green-500/10 text-green-500' : 'bg-slate-500/10 text-slate-500'
+                              }`}>
+                                <span className={`h-1.5 w-1.5 rounded-full ${isEffectivelyOnline(gw.lastSeen) ? 'bg-green-500' : 'bg-slate-500'}`} />
+                                {isEffectivelyOnline(gw.lastSeen) ? 'Online' : 'Offline'}
+                              </span>
+                              <button
+                                onClick={() => setGatewayDeleteConfirm(gw)}
+                                className="p-1 text-muted-foreground hover:text-red-500 transition-colors"
+                                title="Remove gateway"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
                           </div>
 
                           <div className="space-y-1.5 text-sm">
-                            {isEffectivelyOnline(gw.lastSeen) && (gw.connectedSince || gw.firstSeen) && (
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">Connected Time</span>
-                                <span className="text-xs">{formatRelativeTime(gw.connectedSince || gw.firstSeen)}</span>
-                              </div>
-                            )}
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Connected Time</span>
+                              <span className="text-xs">
+                                {isEffectivelyOnline(gw.lastSeen) && (gw.connectedSince || gw.firstSeen)
+                                  ? formatDate(gw.connectedSince || gw.firstSeen)
+                                  : '-'}
+                              </span>
+                            </div>
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">Last Update</span>
-                              <span className="text-xs">{formatRelativeTime(gw.lastSeen)}</span>
+                              <span className="text-xs">
+                                {gw.lastSeen ? formatDate(gw.lastSeen) : '—'}
+                              </span>
                             </div>
                             {!isEffectivelyOnline(gw.lastSeen) && gw.lastSeen && (
                               <div className="flex justify-between">
@@ -2009,7 +1493,15 @@ export default function TTNPage() {
                               <span className="font-semibold">{gw.metrics.totalUplinksSeen}</span>
                             </div>
                           </div>
-                          <p className="text-xs text-muted-foreground mt-3 text-center">Click to view logs</p>
+                          <div className="mt-3 pt-3 border-t border-border/50">
+                            <button
+                              onClick={() => navigateToLogsForGateway(gw.gatewayId)}
+                              className="text-xs text-muted-foreground hover:text-green-500 transition-colors flex items-center gap-1"
+                            >
+                              <Activity className="h-3 w-3" />
+                              View logs
+                            </button>
+                          </div>
                         </motion.div>
                       ))}
                       {gateways.length === 0 && (
@@ -2187,6 +1679,7 @@ export default function TTNPage() {
                               <th className="px-4 py-3 text-left">Time</th>
                               <th className="px-4 py-3 text-left">Device</th>
                               <th className="px-4 py-3 text-left">Port</th>
+                              <th className="px-4 py-3 text-left">FCnt</th>
                               <th className="px-4 py-3 text-left">Payload</th>
                               <th className="px-4 py-3 text-left">RSSI / Status</th>
                               <th className="px-4 py-3 text-left">Gateway</th>
@@ -2215,6 +1708,9 @@ export default function TTNPage() {
                                   </button>
                                 </td>
                                 <td className="px-4 py-3">{entry.fPort ?? '-'}</td>
+                                <td className="px-4 py-3 font-mono text-xs tabular-nums text-muted-foreground">
+                                  {entry._type === 'uplink' && entry.fCnt != null ? `#${entry.fCnt}` : '—'}
+                                </td>
                                 <td className="px-4 py-3 font-mono text-xs max-w-[160px]">
                                   {(() => {
                                     const payload = entry._type === 'uplink' ? entry.rawPayload || '' : entry.payload || '';
@@ -2515,6 +2011,251 @@ export default function TTNPage() {
                     </Button>
                   </div>
                 </form>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Create Device Modal */}
+        <AnimatePresence>
+          {showCreateDevice && selectedApplication && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+              onClick={() => setShowCreateDevice(false)}
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="w-full max-w-lg bg-card rounded-2xl border border-border/50 p-6 overflow-y-auto max-h-[90vh]"
+                onClick={e => e.stopPropagation()}
+              >
+                <h2 className="text-xl font-bold mb-1 flex items-center gap-2">
+                  <Radio className="h-5 w-5 text-violet-500" />
+                  Register LoRaWAN Device
+                </h2>
+                <p className="text-sm text-muted-foreground mb-5">
+                  Add a new device to <span className="font-mono text-foreground">{selectedApplication.applicationId}</span> on TTN
+                </p>
+                <form onSubmit={handleCreateDevice} className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Device ID <span className="text-red-500">*</span></label>
+                      <input
+                        type="text"
+                        value={createDeviceForm.deviceId}
+                        onChange={e => setCreateDeviceForm(f => ({ ...f, deviceId: e.target.value }))}
+                        className="w-full px-3 py-2 border border-border/50 rounded-lg bg-background/50 font-mono text-sm"
+                        placeholder="my-device-01"
+                        required
+                      />
+                      <p className="text-xs text-muted-foreground mt-0.5">Lowercase alphanumeric + hyphens</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Display Name <span className="text-red-500">*</span></label>
+                      <input
+                        type="text"
+                        value={createDeviceForm.name}
+                        onChange={e => setCreateDeviceForm(f => ({ ...f, name: e.target.value }))}
+                        className="w-full px-3 py-2 border border-border/50 rounded-lg bg-background/50 text-sm"
+                        placeholder="My Device"
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Description</label>
+                    <input
+                      type="text"
+                      value={createDeviceForm.description}
+                      onChange={e => setCreateDeviceForm(f => ({ ...f, description: e.target.value }))}
+                      className="w-full px-3 py-2 border border-border/50 rounded-lg bg-background/50 text-sm"
+                      placeholder="Optional description"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">DevEUI <span className="text-red-500">*</span></label>
+                      <input
+                        type="text"
+                        value={createDeviceForm.devEui}
+                        onChange={e => setCreateDeviceForm(f => ({ ...f, devEui: e.target.value }))}
+                        className="w-full px-3 py-2 border border-border/50 rounded-lg bg-background/50 font-mono text-sm"
+                        placeholder="0000000000000000"
+                        maxLength={16}
+                        required
+                      />
+                      <p className="text-xs text-muted-foreground mt-0.5">16 hex chars</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">JoinEUI / AppEUI <span className="text-red-500">*</span></label>
+                      <input
+                        type="text"
+                        value={createDeviceForm.joinEui}
+                        onChange={e => setCreateDeviceForm(f => ({ ...f, joinEui: e.target.value }))}
+                        className="w-full px-3 py-2 border border-border/50 rounded-lg bg-background/50 font-mono text-sm"
+                        placeholder="0000000000000000"
+                        maxLength={16}
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">AppKey</label>
+                    <input
+                      type="text"
+                      value={createDeviceForm.appKey}
+                      onChange={e => setCreateDeviceForm(f => ({ ...f, appKey: e.target.value }))}
+                      className="w-full px-3 py-2 border border-border/50 rounded-lg bg-background/50 font-mono text-sm"
+                      placeholder="00000000000000000000000000000000"
+                      maxLength={32}
+                    />
+                    <p className="text-xs text-muted-foreground mt-0.5">32 hex chars — required for OTAA</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">LoRaWAN Version</label>
+                      <select
+                        value={createDeviceForm.lorawanVersion}
+                        onChange={e => setCreateDeviceForm(f => ({ ...f, lorawanVersion: e.target.value }))}
+                        className="w-full px-3 py-2 border border-border/50 rounded-lg bg-background/50 text-sm"
+                      >
+                        <option value="MAC_V1_0">1.0.0</option>
+                        <option value="MAC_V1_0_1">1.0.1</option>
+                        <option value="MAC_V1_0_2">1.0.2 (default)</option>
+                        <option value="MAC_V1_0_3">1.0.3</option>
+                        <option value="MAC_V1_0_4">1.0.4</option>
+                        <option value="MAC_V1_1">1.1</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Frequency Plan</label>
+                      <select
+                        value={createDeviceForm.frequencyPlanId}
+                        onChange={e => setCreateDeviceForm(f => ({ ...f, frequencyPlanId: e.target.value }))}
+                        className="w-full px-3 py-2 border border-border/50 rounded-lg bg-background/50 text-sm"
+                      >
+                        <option value="EU_863_870_TTN">EU 863–870 MHz</option>
+                        <option value="US_902_928_FSB_2">US 902–928 MHz (FSB2)</option>
+                        <option value="AU_915_928_FSB_2">AU 915–928 MHz</option>
+                        <option value="AS_923">AS 923 MHz</option>
+                        <option value="IN_865_867">IN 865–867 MHz</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex gap-3 pt-2">
+                    <Button type="button" variant="outline" onClick={() => setShowCreateDevice(false)} className="flex-1">
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      disabled={loading}
+                      className="flex-1 bg-gradient-to-r from-violet-500 to-purple-600 text-white border-0"
+                    >
+                      {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Radio className="h-4 w-4 mr-2" />}
+                      Register Device
+                    </Button>
+                  </div>
+                </form>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Delete Device Confirmation */}
+        <AnimatePresence>
+          {deleteDeviceConfirm && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+              onClick={() => setDeleteDeviceConfirm(null)}
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="w-full max-w-md bg-card rounded-2xl border border-red-500/30 p-6"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 rounded-lg bg-red-500/10">
+                    <AlertTriangle className="h-5 w-5 text-red-500" />
+                  </div>
+                  <h2 className="text-xl font-bold">Delete Device</h2>
+                </div>
+                <p className="text-sm text-muted-foreground mb-2">
+                  This will permanently delete <span className="font-semibold text-foreground">{deleteDeviceConfirm.displayName || deleteDeviceConfirm.name}</span> from TTN and local database.
+                </p>
+                <p className="text-xs font-mono bg-secondary/50 px-3 py-2 rounded-lg mb-5 text-muted-foreground">
+                  {deleteDeviceConfirm.deviceId}
+                </p>
+                <div className="flex gap-3">
+                  <Button type="button" variant="outline" onClick={() => setDeleteDeviceConfirm(null)} className="flex-1">
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => handleDeleteDevice(deleteDeviceConfirm)}
+                    className="flex-1 bg-red-500 hover:bg-red-600 text-white border-0"
+                  >
+                    {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+                    Delete Device
+                  </Button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Gateway Remove Confirmation */}
+        <AnimatePresence>
+          {gatewayDeleteConfirm && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+              onClick={() => setGatewayDeleteConfirm(null)}
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="w-full max-w-md bg-card rounded-2xl border border-orange-500/30 p-6"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 rounded-lg bg-orange-500/10">
+                    <AlertTriangle className="h-5 w-5 text-orange-500" />
+                  </div>
+                  <h2 className="text-xl font-bold">Remove Gateway</h2>
+                </div>
+                <p className="text-sm text-muted-foreground mb-2">
+                  This removes <span className="font-semibold text-foreground">{gatewayDeleteConfirm.name || gatewayDeleteConfirm.gatewayId}</span> from local tracking only.
+                </p>
+                <p className="text-xs text-amber-500/80 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 mb-5">
+                  The gateway still exists on TTN. It will reappear automatically when it forwards uplinks.
+                </p>
+                <div className="flex gap-3">
+                  <Button type="button" variant="outline" onClick={() => setGatewayDeleteConfirm(null)} className="flex-1">
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => handleDeleteGateway(gatewayDeleteConfirm)}
+                    className="flex-1 bg-orange-500 hover:bg-orange-600 text-white border-0"
+                  >
+                    {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+                    Remove from Tracking
+                  </Button>
+                </div>
               </motion.div>
             </motion.div>
           )}

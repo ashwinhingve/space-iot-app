@@ -29,6 +29,10 @@ export interface TTNDevice {
   isOnline: boolean;
   lastSeen?: string;
   connectedSince?: string;
+  disconnectedAt?: string;
+  /** True between a deviceJoined event and the next uplink. Used to tag the
+   *  first uplink of a new session with isSessionStart = true. */
+  pendingJoin?: boolean;
   lastUplink?: {
     timestamp: string;
     fPort: number;
@@ -94,6 +98,9 @@ export interface TTNUplink {
   applicationId: string;
   fPort: number;
   fCnt: number;
+  /** True when this uplink is the first one after a device rejoin (new LoRaWAN session).
+   *  Set by the Redux addUplink reducer when it detects a cleared pendingJoin flag. */
+  isSessionStart?: boolean;
   rawPayload: string;
   decodedPayload?: Record<string, unknown>;
   rssi: number;
@@ -356,14 +363,15 @@ export const fetchTTNDevices = createAsyncThunk(
 export const updateTTNDevice = createAsyncThunk(
   'ttn/updateDevice',
   async (
-    { applicationId, deviceId, displayName }: { applicationId: string; deviceId: string; displayName: string },
+    data: { applicationId: string; deviceId: string; name?: string; description?: string; displayName?: string },
     { rejectWithValue }
   ) => {
     try {
+      const { applicationId, deviceId, ...body } = data;
       const response = await fetch(API_ENDPOINTS.TTN_UPDATE_DEVICE(applicationId, deviceId), {
         method: 'PUT',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ displayName }),
+        body: JSON.stringify(body),
       });
       if (!response.ok) {
         const error = await response.json();
@@ -563,6 +571,108 @@ export const updateTTNApiKey = createAsyncThunk(
   }
 );
 
+export const createTTNDevice = createAsyncThunk(
+  'ttn/createDevice',
+  async (
+    data: {
+      applicationId: string;
+      deviceId: string;
+      name: string;
+      description?: string;
+      devEui: string;
+      joinEui: string;
+      appKey?: string;
+      lorawanVersion?: string;
+      phyVersion?: string;
+      frequencyPlanId?: string;
+    },
+    { rejectWithValue }
+  ) => {
+    try {
+      const { applicationId, ...deviceData } = data;
+      const response = await fetch(API_ENDPOINTS.TTN_DEVICES(applicationId), {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(deviceData),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to create device');
+      }
+      return await response.json();
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Failed to create device');
+    }
+  }
+);
+
+export const deleteTTNDevice = createAsyncThunk(
+  'ttn/deleteDevice',
+  async (
+    { applicationId, deviceId }: { applicationId: string; deviceId: string },
+    { rejectWithValue }
+  ) => {
+    try {
+      const response = await fetch(API_ENDPOINTS.TTN_DEVICE_DETAIL(applicationId, deviceId), {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to delete device');
+      }
+      return { applicationId, deviceId };
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Failed to delete device');
+    }
+  }
+);
+
+export const updateTTNGateway = createAsyncThunk(
+  'ttn/updateGateway',
+  async (
+    { applicationId, gatewayId, name, description }: { applicationId: string; gatewayId: string; name: string; description?: string },
+    { rejectWithValue }
+  ) => {
+    try {
+      const response = await fetch(API_ENDPOINTS.TTN_GATEWAY_DETAIL(applicationId, gatewayId), {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ name, description }),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to update gateway');
+      }
+      return await response.json();
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Failed to update gateway');
+    }
+  }
+);
+
+export const deleteTTNGateway = createAsyncThunk(
+  'ttn/deleteGateway',
+  async (
+    { applicationId, gatewayId }: { applicationId: string; gatewayId: string },
+    { rejectWithValue }
+  ) => {
+    try {
+      const response = await fetch(API_ENDPOINTS.TTN_GATEWAY_DETAIL(applicationId, gatewayId), {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to delete gateway');
+      }
+      return { gatewayId };
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Failed to delete gateway');
+    }
+  }
+);
+
 export const fetchTTNLogs = createAsyncThunk(
   'ttn/fetchLogs',
   async (
@@ -613,31 +723,85 @@ const ttnSlice = createSlice({
     setSelectedDevice: (state, action: PayloadAction<TTNDevice | null>) => {
       state.selectedDevice = action.payload;
     },
-    addUplink: (state, action: PayloadAction<TTNUplink>) => {
-      state.uplinks.unshift(action.payload);
+    addUplink: (
+      state,
+      action: PayloadAction<{
+        uplink: TTNUplink;
+        deviceUpdate?: {
+          isOnline: boolean;
+          lastSeen: string;
+          connectedSince: string | null;
+        };
+      }>
+    ) => {
+      const { uplink, deviceUpdate } = action.payload;
+
+      // Detect new session: device sent a join event before this uplink arrived
+      const device = state.devices.find((d) => d.deviceId === uplink.deviceId);
+      const isSessionStart = !!(device?.pendingJoin);
+
+      // Stamp the uplink and prepend to state
+      const stampedUplink: TTNUplink = isSessionStart
+        ? { ...uplink, isSessionStart: true }
+        : uplink;
+      state.uplinks.unshift(stampedUplink);
+
       // Keep only last 100 uplinks in memory
       if (state.uplinks.length > 100) {
         state.uplinks = state.uplinks.slice(0, 100);
       }
+
       // Update device status
+      if (device) {
+        device.isOnline = true;
+        device.lastSeen = uplink.receivedAt;
+        // Clear the pending-join flag now that the first session uplink arrived
+        if (device.pendingJoin) {
+          device.pendingJoin = false;
+        }
+        // Apply server-side connectedSince if provided (marks session start)
+        if (deviceUpdate?.connectedSince) {
+          device.connectedSince = deviceUpdate.connectedSince;
+          device.disconnectedAt = undefined;
+        }
+        device.lastUplink = {
+          timestamp: uplink.receivedAt,
+          fPort: uplink.fPort,
+          fCnt: uplink.fCnt,
+          payload: uplink.rawPayload,
+          decodedPayload: uplink.decodedPayload,
+          rssi: uplink.rssi,
+          snr: uplink.snr,
+          spreadingFactor: uplink.spreadingFactor,
+          bandwidth: uplink.bandwidth,
+          frequency: uplink.frequency,
+          gatewayId: uplink.gatewayId,
+        };
+        device.metrics.totalUplinks++;
+      }
+    },
+    deviceJoined: (
+      state,
+      action: PayloadAction<{ deviceId: string; devAddr?: string; connectedSince: string }>
+    ) => {
       const device = state.devices.find((d) => d.deviceId === action.payload.deviceId);
       if (device) {
         device.isOnline = true;
-        device.lastSeen = action.payload.receivedAt;
-        device.lastUplink = {
-          timestamp: action.payload.receivedAt,
-          fPort: action.payload.fPort,
-          fCnt: action.payload.fCnt,
-          payload: action.payload.rawPayload,
-          decodedPayload: action.payload.decodedPayload,
-          rssi: action.payload.rssi,
-          snr: action.payload.snr,
-          spreadingFactor: action.payload.spreadingFactor,
-          bandwidth: action.payload.bandwidth,
-          frequency: action.payload.frequency,
-          gatewayId: action.payload.gatewayId,
-        };
-        device.metrics.totalUplinks++;
+        device.connectedSince = action.payload.connectedSince;
+        device.disconnectedAt = undefined;
+        if (action.payload.devAddr) device.devAddr = action.payload.devAddr;
+        // Mark that the next uplink starts a new LoRaWAN session (FCnt reset)
+        device.pendingJoin = true;
+      }
+    },
+    deviceOffline: (
+      state,
+      action: PayloadAction<{ deviceId: string; disconnectedAt: string }>
+    ) => {
+      const device = state.devices.find((d) => d.deviceId === action.payload.deviceId);
+      if (device) {
+        device.isOnline = false;
+        device.disconnectedAt = action.payload.disconnectedAt;
       }
     },
     updateDownlinkStatus: (
@@ -745,9 +909,19 @@ const ttnSlice = createSlice({
         state.error = action.payload as string;
       })
       // Update Device
+      .addCase(updateTTNDevice.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
       .addCase(updateTTNDevice.fulfilled, (state, action) => {
+        state.loading = false;
         const idx = state.devices.findIndex((d) => d._id === action.payload._id);
-        if (idx !== -1) state.devices[idx] = action.payload;
+        if (idx !== -1) state.devices[idx] = { ...state.devices[idx], ...action.payload };
+        state.success = 'Device updated successfully';
+      })
+      .addCase(updateTTNDevice.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string;
       })
       // Fetch Uplinks
       .addCase(fetchTTNUplinks.fulfilled, (state, action) => {
@@ -797,6 +971,37 @@ const ttnSlice = createSlice({
       .addCase(fetchTTNGatewayStats.fulfilled, (state, action) => {
         state.gatewayStats = action.payload;
       })
+      // Create Device
+      .addCase(createTTNDevice.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(createTTNDevice.fulfilled, (state, action) => {
+        state.loading = false;
+        state.devices.push(action.payload.device);
+        state.success = action.payload.message || 'Device created successfully';
+      })
+      .addCase(createTTNDevice.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string;
+      })
+      // Delete Device
+      .addCase(deleteTTNDevice.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(deleteTTNDevice.fulfilled, (state, action) => {
+        state.loading = false;
+        state.devices = state.devices.filter((d) => d.deviceId !== action.payload.deviceId);
+        if (state.selectedDevice?.deviceId === action.payload.deviceId) {
+          state.selectedDevice = null;
+        }
+        state.success = 'Device deleted successfully';
+      })
+      .addCase(deleteTTNDevice.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string;
+      })
       // Update API Key
       .addCase(updateTTNApiKey.pending, (state) => {
         state.loading = true;
@@ -804,7 +1009,6 @@ const ttnSlice = createSlice({
       })
       .addCase(updateTTNApiKey.fulfilled, (state, action) => {
         state.loading = false;
-        // Update hasApiKey on the application
         const app = state.applications.find((a) => a._id === action.payload.id);
         if (app) app.hasApiKey = true;
         if (state.selectedApplication && state.selectedApplication._id === action.payload.id) {
@@ -814,6 +1018,23 @@ const ttnSlice = createSlice({
       })
       .addCase(updateTTNApiKey.rejected, (state, action) => {
         state.loading = false;
+        state.error = action.payload as string;
+      })
+      // Update Gateway
+      .addCase(updateTTNGateway.fulfilled, (state, action) => {
+        const idx = state.gateways.findIndex((g) => g.gatewayId === action.payload.gatewayId);
+        if (idx !== -1) state.gateways[idx] = { ...state.gateways[idx], ...action.payload };
+        state.success = 'Gateway updated successfully';
+      })
+      .addCase(updateTTNGateway.rejected, (state, action) => {
+        state.error = action.payload as string;
+      })
+      // Delete Gateway
+      .addCase(deleteTTNGateway.fulfilled, (state, action) => {
+        state.gateways = state.gateways.filter((g) => g.gatewayId !== action.payload.gatewayId);
+        state.success = 'Gateway removed from local tracking';
+      })
+      .addCase(deleteTTNGateway.rejected, (state, action) => {
         state.error = action.payload as string;
       });
   },
@@ -827,8 +1048,11 @@ export const {
   updateDownlinkStatus,
   updateDeviceOnlineStatus,
   updateGatewayFromUplink,
+  deviceOffline,
+  deviceJoined,
   clearError,
   clearSuccess,
 } = ttnSlice.actions;
+
 
 export default ttnSlice.reducer;

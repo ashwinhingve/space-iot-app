@@ -867,6 +867,74 @@ export const acknowledgeAlarm = async (req: Request, res: Response): Promise<voi
 };
 
 /**
+ * Resolve alarm
+ *
+ * @route POST /api/valves/:id/alarms/:alarmId/resolve
+ * @access Private
+ */
+export const resolveAlarm = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const valve = await Valve.findById(req.params.id);
+
+    if (!valve) {
+      res.status(404).json({
+        error: 'VALVE_NOT_FOUND',
+        message: 'Valve not found'
+      });
+      return;
+    }
+
+    // Verify ownership
+    const manifold = await Manifold.findOne({
+      _id: valve.manifoldId,
+      owner: req.user._id
+    });
+
+    if (!manifold) {
+      res.status(403).json({
+        error: 'UNAUTHORIZED',
+        message: 'You do not have access to this valve'
+      });
+      return;
+    }
+
+    const alarm = valve.alarms.find(a => a.alarmId === req.params.alarmId);
+
+    if (!alarm) {
+      res.status(404).json({
+        error: 'ALARM_NOT_FOUND',
+        message: 'Alarm not found'
+      });
+      return;
+    }
+
+    const now = new Date();
+    alarm.resolved = true;
+    alarm.resolvedAt = now;
+    // Auto-acknowledge if not yet acknowledged
+    if (!alarm.acknowledged) {
+      alarm.acknowledged = true;
+      alarm.acknowledgedBy = req.user._id;
+      alarm.acknowledgedAt = now;
+    }
+
+    await valve.save();
+
+    res.json({
+      success: true,
+      message: 'Alarm resolved successfully',
+      alarm
+    });
+  } catch (error: any) {
+    console.error('Error resolving alarm:', error);
+    res.status(500).json({
+      error: 'INTERNAL_SERVER_ERROR',
+      message: error.message || 'Error resolving alarm'
+    });
+  }
+};
+
+/**
  * Create irrigation schedule
  *
  * @route POST /api/valves/:id/schedules
@@ -886,35 +954,58 @@ export const createSchedule = async (req: Request, res: Response): Promise<void>
     }
 
     const hasCron = Boolean(cronExpression);
-    const hasStartEnd = Boolean(startAt && endAt);
+    const hasStartAt = Boolean(startAt);
+    const hasEndAt = Boolean(endAt);
 
-    if (!hasCron && !hasStartEnd) {
-      res.status(400).json({
-        error: 'VALIDATION_ERROR',
-        message: 'Either cronExpression or startAt/endAt is required'
-      });
-      return;
+    // For ON action: require startAt (endAt optional)
+    // For OFF action: require endAt (startAt optional)
+    // Either cron or the relevant time field must be provided
+    if (!hasCron) {
+      if (action === 'ON' && !hasStartAt) {
+        res.status(400).json({
+          error: 'VALIDATION_ERROR',
+          message: 'startAt is required for ON action (or provide cronExpression)'
+        });
+        return;
+      }
+      if (action === 'OFF' && !hasEndAt) {
+        res.status(400).json({
+          error: 'VALIDATION_ERROR',
+          message: 'endAt is required for OFF action (or provide cronExpression)'
+        });
+        return;
+      }
     }
 
     let parsedStartAt: Date | undefined;
     let parsedEndAt: Date | undefined;
-    if (hasStartEnd) {
+    if (hasStartAt) {
       parsedStartAt = new Date(startAt);
+      if (Number.isNaN(parsedStartAt.getTime())) {
+        res.status(400).json({
+          error: 'VALIDATION_ERROR',
+          message: 'Invalid startAt date'
+        });
+        return;
+      }
+    }
+    if (hasEndAt) {
       parsedEndAt = new Date(endAt);
-      if (Number.isNaN(parsedStartAt.getTime()) || Number.isNaN(parsedEndAt.getTime())) {
+      if (Number.isNaN(parsedEndAt.getTime())) {
         res.status(400).json({
           error: 'VALIDATION_ERROR',
-          message: 'Invalid startAt or endAt date'
+          message: 'Invalid endAt date'
         });
         return;
       }
-      if (parsedEndAt <= parsedStartAt) {
-        res.status(400).json({
-          error: 'VALIDATION_ERROR',
-          message: 'endAt must be later than startAt'
-        });
-        return;
-      }
+    }
+    // Only validate ordering when both are provided
+    if (parsedStartAt && parsedEndAt && parsedEndAt <= parsedStartAt) {
+      res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        message: 'endAt must be later than startAt'
+      });
+      return;
     }
 
     const valve = await Valve.findById(req.params.id);

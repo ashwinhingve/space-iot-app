@@ -10,7 +10,7 @@ import { TTNDevice } from '../models/TTNDevice';
 import { TTNUplink } from '../models/TTNUplink';
 import { TTNDownlink } from '../models/TTNDownlink';
 import { TTNGateway } from '../models/TTNGateway';
-import { ttnService, TTNConfig, TTNAuthError, TTNRateLimitError, TTNNetworkError } from '../services/ttnService';
+import { ttnService, TTNConfig, TTNAuthError, TTNRateLimitError, TTNNetworkError, TTNCreateDeviceConfig } from '../services/ttnService';
 import { ttnMqttService } from '../services/ttnMqttService';
 
 /**
@@ -408,24 +408,58 @@ export const getDevices = async (req: Request, res: Response) => {
 };
 
 /**
- * Update a device's display name
+ * Update a device name/description — syncs to TTN and local DB
  */
 export const updateDevice = async (req: Request, res: Response) => {
   try {
     const { applicationId, deviceId } = req.params;
-    const { displayName } = req.body;
+    const { name, description, displayName } = req.body;
 
-    const device = await TTNDevice.findOneAndUpdate(
-      { deviceId, applicationId, owner: req.user._id },
-      { $set: { displayName } },
-      { new: true }
-    );
-
+    const device = await TTNDevice.findOne({ deviceId, applicationId, owner: req.user._id });
     if (!device) {
       return res.status(404).json({ error: 'Device not found' });
     }
 
-    res.json(device);
+    // Build local update fields
+    const localUpdate: Record<string, unknown> = {};
+    if (name !== undefined) localUpdate.name = name;
+    if (description !== undefined) localUpdate.description = description;
+    if (displayName !== undefined) localUpdate.displayName = displayName;
+
+    // Sync name/description to TTN if provided
+    let ttnSynced = false;
+    if (name !== undefined) {
+      const application = await TTNApplication.findOne({
+        applicationId,
+        owner: req.user._id,
+      }).select('+apiKeyEncrypted');
+
+      if (application) {
+        const apiKey = application.getApiKey();
+        if (apiKey) {
+          ttnService.initialize({ region: application.ttnRegion, applicationId, apiKey });
+          try {
+            await ttnService.updateDeviceName(deviceId, name, description);
+            ttnSynced = true;
+            console.log(`[TTN] Device ${deviceId} name updated on TTN`);
+          } catch (ttnErr) {
+            // Non-fatal: TTN sync failed but we still update locally
+            console.warn(`[TTN] Name sync failed for ${deviceId}:`, ttnErr);
+          }
+        }
+      }
+    }
+
+    const updated = await TTNDevice.findOneAndUpdate(
+      { deviceId, applicationId, owner: req.user._id },
+      { $set: localUpdate },
+      { new: true }
+    );
+
+    res.json({
+      ...updated?.toObject(),
+      ttnSynced,
+    });
   } catch (error) {
     console.error('Error updating TTN device:', error);
     res.status(500).json({ error: 'Failed to update device' });
@@ -453,6 +487,160 @@ export const getDevice = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error fetching TTN device:', error);
     res.status(500).json({ error: 'Failed to fetch device' });
+  }
+};
+
+/**
+ * Create a new LoRaWAN device on TTN and in the local database
+ */
+export const createDevice = async (req: Request, res: Response) => {
+  try {
+    const { applicationId } = req.params;
+    const { deviceId, name, description, devEui, joinEui, appKey, lorawanVersion, phyVersion, frequencyPlanId } = req.body;
+
+    if (!deviceId || !name || !devEui || !joinEui) {
+      return res.status(400).json({ error: 'deviceId, name, devEui, and joinEui are required' });
+    }
+
+    // Validate EUI format (16 hex chars)
+    const euiRegex = /^[0-9A-Fa-f]{16}$/;
+    if (!euiRegex.test(devEui)) {
+      return res.status(400).json({ error: 'devEui must be 16 hexadecimal characters' });
+    }
+    if (!euiRegex.test(joinEui)) {
+      return res.status(400).json({ error: 'joinEui must be 16 hexadecimal characters' });
+    }
+    if (appKey && !/^[0-9A-Fa-f]{32}$/.test(appKey)) {
+      return res.status(400).json({ error: 'appKey must be 32 hexadecimal characters' });
+    }
+
+    // Check for duplicate deviceId in local DB
+    const existing = await TTNDevice.findOne({ deviceId, applicationId });
+    if (existing) {
+      return res.status(409).json({ error: `Device "${deviceId}" already exists in this application` });
+    }
+
+    // Get application with API key
+    const application = await TTNApplication.findOne({
+      applicationId,
+      owner: req.user._id,
+    }).select('+apiKeyEncrypted');
+
+    if (!application) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+
+    const apiKey = application.getApiKey();
+    if (!apiKey) {
+      return res.status(400).json({ error: 'No API key available. Please update the API key for this application.' });
+    }
+
+    // Initialize TTN service
+    ttnService.initialize({ region: application.ttnRegion, applicationId, apiKey });
+
+    // Create on TTN
+    const deviceConfig: TTNCreateDeviceConfig = {
+      deviceId,
+      name,
+      description,
+      devEui,
+      joinEui,
+      appKey,
+      lorawanVersion,
+      phyVersion,
+      frequencyPlanId,
+    };
+
+    let ttnDevice;
+    try {
+      ttnDevice = await ttnService.createDevice(deviceConfig);
+    } catch (ttnError: unknown) {
+      return handleTTNError(res, ttnError, 'Failed to create device on TTN');
+    }
+
+    // Create in local database
+    const device = new TTNDevice({
+      deviceId,
+      applicationId,
+      owner: req.user._id,
+      name,
+      description,
+      devEui: devEui.toUpperCase(),
+      joinEui: joinEui.toUpperCase(),
+      isOnline: false,
+      metrics: { totalUplinks: 0, totalDownlinks: 0 },
+    });
+
+    await device.save();
+
+    res.status(201).json({
+      success: true,
+      device,
+      ttnDevice,
+      message: `Device "${deviceId}" created successfully on TTN and registered locally.`,
+    });
+  } catch (error) {
+    console.error('Error creating TTN device:', error);
+    res.status(500).json({ error: 'Failed to create device' });
+  }
+};
+
+/**
+ * Delete a device from TTN and from the local database
+ */
+export const deleteTTNDevice = async (req: Request, res: Response) => {
+  try {
+    const { applicationId, deviceId } = req.params;
+
+    // Find device to ensure ownership
+    const device = await TTNDevice.findOne({ deviceId, applicationId, owner: req.user._id });
+    if (!device) {
+      return res.status(404).json({ error: 'Device not found' });
+    }
+
+    // Get application with API key
+    const application = await TTNApplication.findOne({
+      applicationId,
+      owner: req.user._id,
+    }).select('+apiKeyEncrypted');
+
+    if (!application) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+
+    const apiKey = application.getApiKey();
+    if (!apiKey) {
+      return res.status(400).json({ error: 'No API key available. Please update the API key for this application.' });
+    }
+
+    // Initialize TTN service and delete from TTN
+    ttnService.initialize({ region: application.ttnRegion, applicationId, apiKey });
+
+    try {
+      await ttnService.deleteDevice(deviceId);
+    } catch (ttnError: unknown) {
+      // Log TTN error but continue to delete locally if it's a 404 (already gone)
+      if (ttnError instanceof Error && ttnError.message.includes('404')) {
+        console.warn(`[TTN] Device ${deviceId} not found on TTN, removing from local DB only`);
+      } else {
+        return handleTTNError(res, ttnError, 'Failed to delete device from TTN');
+      }
+    }
+
+    // Delete from local database (device + uplinks + downlinks)
+    await Promise.all([
+      TTNDevice.deleteOne({ deviceId, applicationId }),
+      TTNUplink.deleteMany({ deviceId, applicationId }),
+      TTNDownlink.deleteMany({ deviceId, applicationId }),
+    ]);
+
+    res.json({
+      success: true,
+      message: `Device "${deviceId}" deleted from TTN and local database.`,
+    });
+  } catch (error) {
+    console.error('Error deleting TTN device:', error);
+    res.status(500).json({ error: 'Failed to delete device' });
   }
 };
 
@@ -902,6 +1090,66 @@ export const getGateway = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error fetching TTN gateway:', error);
     res.status(500).json({ error: 'Failed to fetch gateway' });
+  }
+};
+
+/**
+ * Update a gateway's local name / description
+ * Note: TTN gateway management requires separate gateway-level credentials.
+ * This endpoint updates the local database record only.
+ */
+export const updateGateway = async (req: Request, res: Response) => {
+  try {
+    const { applicationId, gatewayId } = req.params;
+    const { name, description } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+
+    const gateway = await TTNGateway.findOneAndUpdate(
+      { gatewayId, applicationId, owner: req.user._id },
+      { $set: { name, ...(description !== undefined ? { description } : {}) } },
+      { new: true }
+    );
+
+    if (!gateway) {
+      return res.status(404).json({ error: 'Gateway not found' });
+    }
+
+    res.json(gateway);
+  } catch (error) {
+    console.error('Error updating TTN gateway:', error);
+    res.status(500).json({ error: 'Failed to update gateway' });
+  }
+};
+
+/**
+ * Remove a gateway from the local database
+ * Note: TTN gateway management requires separate gateway-level credentials.
+ * This removes it from local tracking only; the gateway still exists on TTN.
+ */
+export const deleteGateway = async (req: Request, res: Response) => {
+  try {
+    const { applicationId, gatewayId } = req.params;
+
+    const result = await TTNGateway.deleteOne({
+      gatewayId,
+      applicationId,
+      owner: req.user._id,
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: 'Gateway not found' });
+    }
+
+    res.json({
+      success: true,
+      message: `Gateway "${gatewayId}" removed from local tracking. It still exists on TTN.`,
+    });
+  } catch (error) {
+    console.error('Error deleting TTN gateway:', error);
+    res.status(500).json({ error: 'Failed to delete gateway' });
   }
 };
 

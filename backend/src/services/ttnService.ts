@@ -66,6 +66,27 @@ export interface TTNDeviceInfo {
   updated_at: string;
 }
 
+export interface TTNCreateDeviceConfig {
+  deviceId: string;
+  name: string;
+  description?: string;
+  devEui: string;       // 16 hex chars
+  joinEui: string;      // 16 hex chars
+  appKey?: string;      // 32 hex chars — optional, for OTAA key provisioning
+  lorawanVersion?: string;  // default: MAC_V1_0_3
+  phyVersion?: string;      // default: PHY_V1_0_3_REV_A
+  frequencyPlanId?: string; // derived from region if not provided
+}
+
+/** Map region to default frequency plan */
+function defaultFrequencyPlan(region: string): string {
+  switch (region) {
+    case 'nam1': return 'US_902_928_FSB_2';
+    case 'au1':  return 'AU_915_928_FSB_2';
+    default:     return 'EU_863_870_TTN';
+  }
+}
+
 export interface TTNDownlinkRequest {
   deviceId: string;
   fPort: number;
@@ -464,6 +485,230 @@ class TTNService {
       receivedAt: new Date(uplinkMessage.received_at as string),
       confirmed: uplinkMessage.confirmed as boolean || false,
     };
+  }
+
+  /**
+   * Create a new end device on TTN (IS + NS + AS + optionally JS for OTAA keys)
+   */
+  async createDevice(deviceConfig: TTNCreateDeviceConfig): Promise<TTNDeviceInfo> {
+    if (!this.config) throw new Error('TTN Service not initialized');
+
+    const { region, applicationId, apiKey } = this.config;
+    const {
+      deviceId,
+      name,
+      description,
+      devEui,
+      joinEui,
+      appKey,
+      lorawanVersion = 'MAC_V1_0_3',
+      phyVersion = 'PHY_V1_0_3_REV_A',
+      frequencyPlanId,
+    } = deviceConfig;
+
+    const freqPlan = frequencyPlanId || defaultFrequencyPlan(region);
+    const serverAddr = `${region}.cloud.thethings.network`;
+    const baseUrl = this.getBaseUrl();
+    const headers = { ...this.getHeaders() };
+
+    // ── Step 1: Register on Identity Server ──────────────────────────────────
+    const isBody = {
+      end_device: {
+        ids: {
+          device_id: deviceId,
+          dev_eui: devEui.toUpperCase(),
+          join_eui: joinEui.toUpperCase(),
+          application_ids: { application_id: applicationId },
+        },
+        name,
+        description: description || '',
+        network_server_address: serverAddr,
+        application_server_address: serverAddr,
+        join_server_address: serverAddr,
+      },
+      field_mask: {
+        paths: [
+          'ids', 'name', 'description',
+          'network_server_address', 'application_server_address', 'join_server_address',
+        ],
+      },
+    };
+
+    const isResponse = await fetch(`${baseUrl}/applications/${applicationId}/devices`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(isBody),
+    });
+
+    if (!isResponse.ok) {
+      const body = await isResponse.json().catch(() => ({}));
+      throw parseTTNError(isResponse.status, body);
+    }
+
+    const createdDevice = await isResponse.json() as TTNDeviceInfo;
+
+    // ── Step 2: Register on Network Server ───────────────────────────────────
+    const nsBody = {
+      end_device: {
+        ids: {
+          device_id: deviceId,
+          application_ids: { application_id: applicationId },
+          dev_eui: devEui.toUpperCase(),
+          join_eui: joinEui.toUpperCase(),
+        },
+        lorawan_version: lorawanVersion,
+        lorawan_phy_version: phyVersion,
+        frequency_plan_id: freqPlan,
+        supports_join: true,
+        multicast: false,
+      },
+      field_mask: {
+        paths: ['ids', 'lorawan_version', 'lorawan_phy_version', 'frequency_plan_id', 'supports_join', 'multicast'],
+      },
+    };
+
+    try {
+      const nsResponse = await fetch(`${baseUrl}/ns/applications/${applicationId}/devices/${deviceId}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(nsBody),
+      });
+      if (!nsResponse.ok) {
+        console.warn(`[TTN] NS registration failed for ${deviceId}:`, await nsResponse.text());
+      }
+    } catch (nsErr) {
+      console.warn(`[TTN] NS registration error for ${deviceId}:`, nsErr);
+    }
+
+    // ── Step 3: Register on Application Server ───────────────────────────────
+    const asBody = {
+      end_device: {
+        ids: {
+          device_id: deviceId,
+          application_ids: { application_id: applicationId },
+          dev_eui: devEui.toUpperCase(),
+          join_eui: joinEui.toUpperCase(),
+        },
+      },
+      field_mask: { paths: ['ids'] },
+    };
+
+    try {
+      const asResponse = await fetch(`${baseUrl}/as/applications/${applicationId}/devices/${deviceId}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(asBody),
+      });
+      if (!asResponse.ok) {
+        console.warn(`[TTN] AS registration failed for ${deviceId}:`, await asResponse.text());
+      }
+    } catch (asErr) {
+      console.warn(`[TTN] AS registration error for ${deviceId}:`, asErr);
+    }
+
+    // ── Step 4: Register AppKey on Join Server (optional) ────────────────────
+    if (appKey) {
+      const jsBody = {
+        end_device: {
+          ids: {
+            device_id: deviceId,
+            application_ids: { application_id: applicationId },
+            dev_eui: devEui.toUpperCase(),
+            join_eui: joinEui.toUpperCase(),
+          },
+          root_keys: {
+            app_key: { key: appKey.toUpperCase() },
+          },
+        },
+        field_mask: { paths: ['ids', 'root_keys.app_key'] },
+      };
+
+      try {
+        const jsResponse = await fetch(`${baseUrl}/js/applications/${applicationId}/devices/${deviceId}`, {
+          method: 'POST',
+          headers: { ...headers, Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify(jsBody),
+        });
+        if (!jsResponse.ok) {
+          console.warn(`[TTN] JS key registration failed for ${deviceId}:`, await jsResponse.text());
+        }
+      } catch (jsErr) {
+        console.warn(`[TTN] JS registration error for ${deviceId}:`, jsErr);
+      }
+    }
+
+    console.log(`[TTN] Device ${deviceId} created on TTN (IS + NS + AS${appKey ? ' + JS' : ''})`);
+    return createdDevice;
+  }
+
+  /**
+   * Delete a device from TTN (IS, with cascade to NS/AS/JS)
+   */
+  async deleteDevice(deviceId: string): Promise<boolean> {
+    if (!this.config) throw new Error('TTN Service not initialized');
+
+    const url = `${this.getBaseUrl()}/applications/${this.config.applicationId}/devices/${deviceId}`;
+
+    try {
+      const response = await fetch(url, {
+        method: 'DELETE',
+        headers: this.getHeaders(),
+      });
+
+      if (!response.ok && response.status !== 404) {
+        const body = await response.json().catch(() => ({}));
+        throw parseTTNError(response.status, body);
+      }
+
+      console.log(`[TTN] Device ${deviceId} deleted from TTN`);
+      return true;
+    } catch (error) {
+      if (error instanceof TTNAuthError || error instanceof TTNRateLimitError || error instanceof TTNNetworkError) throw error;
+      if (error instanceof TypeError) throw new TTNNetworkError('Cannot reach TTN API');
+      console.error(`Error deleting TTN device ${deviceId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update device name/description on TTN
+   */
+  async updateDeviceName(deviceId: string, name: string, description?: string): Promise<boolean> {
+    if (!this.config) throw new Error('TTN Service not initialized');
+
+    const url = `${this.getBaseUrl()}/applications/${this.config.applicationId}/devices/${deviceId}`;
+
+    const body = {
+      end_device: {
+        ids: {
+          device_id: deviceId,
+          application_ids: { application_id: this.config.applicationId },
+        },
+        name,
+        ...(description !== undefined ? { description } : {}),
+      },
+      field_mask: { paths: description !== undefined ? ['name', 'description'] : ['name'] },
+    };
+
+    try {
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: this.getHeaders(),
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const resBody = await response.json().catch(() => ({}));
+        throw parseTTNError(response.status, resBody);
+      }
+
+      return true;
+    } catch (error) {
+      if (error instanceof TTNAuthError || error instanceof TTNRateLimitError || error instanceof TTNNetworkError) throw error;
+      if (error instanceof TypeError) throw new TTNNetworkError('Cannot reach TTN API');
+      console.error(`Error updating TTN device ${deviceId}:`, error);
+      throw error;
+    }
   }
 
   /**

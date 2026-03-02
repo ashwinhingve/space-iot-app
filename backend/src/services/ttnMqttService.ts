@@ -19,9 +19,17 @@ interface TTNMqttConfig {
   apiKey: string;
 }
 
+/**
+ * How long (ms) without an uplink before a device is considered offline.
+ * LoRaWAN devices are connectionless, so we use a generous timeout.
+ */
+const OFFLINE_THRESHOLD_MS = 60 * 60 * 1000; // 60 minutes
+
 class TTNMqttService {
   private clients: Map<string, MqttClient> = new Map();
   private io: SocketIOServer | null = null;
+  /** Per-device offline detection timers. Key = "{applicationId}:{deviceId}" */
+  private offlineTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
   /**
    * Set the Socket.io server instance for real-time updates
@@ -70,7 +78,7 @@ class TTNMqttService {
           }
         });
 
-        // Subscribe to downlink events
+        // Subscribe to downlink and join events
         const downlinkTopics = [
           `v3/${config.applicationId}@ttn/devices/+/down/sent`,
           `v3/${config.applicationId}@ttn/devices/+/down/ack`,
@@ -147,6 +155,43 @@ class TTNMqttService {
     } else if (eventType.startsWith('down/')) {
       await this.handleDownlinkEvent(payload, eventType.replace('down/', ''));
     }
+  }
+
+  /**
+   * Schedule an offline check for a device.
+   * If no uplink is received within OFFLINE_THRESHOLD_MS, the device is marked offline.
+   */
+  private scheduleOfflineCheck(deviceId: string, applicationId: string): void {
+    const key = `${applicationId}:${deviceId}`;
+
+    // Clear any existing timer for this device
+    const existing = this.offlineTimers.get(key);
+    if (existing) clearTimeout(existing);
+
+    const timer = setTimeout(async () => {
+      try {
+        const updated = await TTNDevice.findOneAndUpdate(
+          { deviceId, applicationId, isOnline: true },
+          { $set: { isOnline: false } },
+          { new: true }
+        );
+
+        this.offlineTimers.delete(key);
+
+        if (updated && this.io) {
+          this.io.to(`ttn-${applicationId}`).emit('ttnDeviceOffline', {
+            deviceId,
+            applicationId,
+            timestamp: new Date().toISOString(),
+          });
+          console.log(`[TTN MQTT] Device ${deviceId} marked offline (no uplink in ${OFFLINE_THRESHOLD_MS / 60000} min)`);
+        }
+      } catch (err) {
+        console.error(`[TTN MQTT] Error marking device ${deviceId} offline:`, err);
+      }
+    }, OFFLINE_THRESHOLD_MS);
+
+    this.offlineTimers.set(key, timer);
   }
 
   /**
@@ -229,9 +274,13 @@ class TTNMqttService {
       const uplink = new TTNUplink(uplinkData);
       await uplink.save();
 
+      // Fetch current device status to detect offline→online transition
       const existingDevice = await TTNDevice.findOne({ deviceId, applicationId })
-        .select('connectedSince')
+        .select('isOnline connectedSince')
         .lean();
+
+      // Device is transitioning from offline to online (or is new)
+      const wasOffline = !existingDevice || !existingDevice.isOnline;
 
       const deviceUpdate: Record<string, unknown> = {
         isOnline: true,
@@ -251,7 +300,9 @@ class TTNMqttService {
           gatewayId: uplinkData.gatewayId,
         },
       };
-      if (!existingDevice?.connectedSince) {
+
+      // Update connectedSince whenever the device comes back online from offline
+      if (wasOffline) {
         deviceUpdate.connectedSince = uplinkData.receivedAt;
       }
 
@@ -263,6 +314,9 @@ class TTNMqttService {
           $inc: { 'metrics.totalUplinks': 1 },
         }
       );
+
+      // Schedule offline check (resets the timer on every uplink)
+      this.scheduleOfflineCheck(deviceId, applicationId);
 
       // Upsert gateway records for each gateway that received this uplink
       const gatewayUpdatePromises = gatewaysData.map(async (gw) => {
@@ -328,15 +382,31 @@ class TTNMqttService {
             ...uplinkData,
             createdAt: uplink.createdAt,
           },
-          timestamp: new Date(),
+          // Include updated device fields so frontend can patch Redux state
+          deviceUpdate: {
+            isOnline: true,
+            lastSeen: uplinkData.receivedAt.toISOString(),
+            connectedSince: wasOffline ? uplinkData.receivedAt.toISOString() : (existingDevice?.connectedSince ? existingDevice.connectedSince.toString() : null),
+          },
+          timestamp: new Date().toISOString(),
         });
+
+        // Emit online status change event if device just came online
+        if (wasOffline) {
+          this.io.to(`ttn-${applicationId}`).emit('ttnDeviceOnline', {
+            deviceId,
+            applicationId,
+            connectedSince: uplinkData.receivedAt.toISOString(),
+            timestamp: new Date().toISOString(),
+          });
+        }
 
         // Emit gateway update event
         if (gatewaysData.length > 0) {
           this.io.to(`ttn-${applicationId}`).emit('ttnGatewayUpdate', {
             applicationId,
             gateways: gatewaysData.map((gw) => gw.gatewayId),
-            timestamp: new Date(),
+            timestamp: new Date().toISOString(),
           });
         }
       }
@@ -359,29 +429,37 @@ class TTNMqttService {
     console.log(`[TTN MQTT] Device joined: ${deviceId}`);
 
     const existingDevice = await TTNDevice.findOne({ deviceId, applicationId })
-      .select('connectedSince')
+      .select('isOnline connectedSince')
       .lean();
+
     const joinedAt = new Date();
+    const wasOffline = !existingDevice || !existingDevice.isOnline;
+
     const joinUpdate: Record<string, unknown> = {
       isOnline: true,
       lastSeen: joinedAt,
       devAddr,
     };
-    if (!existingDevice?.connectedSince) {
-      joinUpdate.connectedSince = joinedAt;
-    }
+
+    // Always update connectedSince on a join event — it marks a new network session
+    joinUpdate.connectedSince = joinedAt;
 
     await TTNDevice.findOneAndUpdate(
       { deviceId, applicationId },
       { $set: joinUpdate }
     );
 
+    // Schedule offline detection for joined device
+    this.scheduleOfflineCheck(deviceId, applicationId);
+
     if (this.io) {
       this.io.to(`ttn-${applicationId}`).emit('ttnDeviceJoin', {
         deviceId,
         applicationId,
         devAddr,
-        timestamp: new Date(),
+        connectedSince: joinedAt.toISOString(),
+        wasOffline,
+        timestamp: new Date().toISOString(),
       });
     }
   }
@@ -396,13 +474,20 @@ class TTNMqttService {
     const deviceId = endDeviceIds.device_id as string;
     const applicationId = (endDeviceIds.application_ids as Record<string, unknown>)?.application_id as string;
 
+    // Extract correlation IDs from the downlink message
+    const downlinkKey = `downlink_${eventType}`;
+    const downlinkMsg = payload[downlinkKey] as Record<string, unknown> | undefined;
+    const correlationIds = (downlinkMsg?.correlation_ids as string[]) || [];
+
     console.log(`[TTN MQTT] Downlink ${eventType}: device=${deviceId}`);
 
     if (this.io) {
-      this.io.to(`ttn-${applicationId}`).emit(`ttnDownlink${eventType.charAt(0).toUpperCase() + eventType.slice(1)}`, {
+      const eventName = `ttnDownlink${eventType.charAt(0).toUpperCase() + eventType.slice(1)}`;
+      this.io.to(`ttn-${applicationId}`).emit(eventName, {
         deviceId,
         applicationId,
-        timestamp: new Date(),
+        correlationIds,
+        timestamp: new Date().toISOString(),
       });
     }
   }
@@ -443,6 +528,13 @@ class TTNMqttService {
         this.clients.delete(applicationId);
         console.log(`[TTN MQTT] Disconnected: ${applicationId}`);
       }
+      // Clear all offline timers for this application
+      for (const [key, timer] of this.offlineTimers.entries()) {
+        if (key.startsWith(`${applicationId}:`)) {
+          clearTimeout(timer);
+          this.offlineTimers.delete(key);
+        }
+      }
     } else {
       // Disconnect all
       for (const [appId, client] of this.clients.entries()) {
@@ -450,6 +542,11 @@ class TTNMqttService {
         console.log(`[TTN MQTT] Disconnected: ${appId}`);
       }
       this.clients.clear();
+      // Clear all offline timers
+      for (const timer of this.offlineTimers.values()) {
+        clearTimeout(timer);
+      }
+      this.offlineTimers.clear();
       console.log('[TTN MQTT] All connections closed');
     }
   }

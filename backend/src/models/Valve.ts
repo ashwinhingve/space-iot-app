@@ -45,6 +45,11 @@ export interface IValve extends mongoose.Document {
     acknowledged: boolean;
     acknowledgedBy?: mongoose.Types.ObjectId;
     acknowledgedAt?: Date;
+    resolved: boolean;
+    resolvedAt?: Date;
+    alarmType: 'COMM_LOSS' | 'LOW_PRESSURE' | 'HIGH_PRESSURE' | 'VALVE_FAULT' |
+               'IO_FAULT' | 'DEVICE_OFFLINE' | 'BATTERY_LOW' | 'SENSOR_FAULT' |
+               'THRESHOLD_BREACH' | 'TAMPER' | 'MANUAL';
   }>;
 
   alarmConfig: {
@@ -227,6 +232,22 @@ const valveSchema = new mongoose.Schema({
     },
     acknowledgedAt: {
       type: Date
+    },
+    resolved: {
+      type: Boolean,
+      default: false
+    },
+    resolvedAt: {
+      type: Date
+    },
+    alarmType: {
+      type: String,
+      enum: [
+        'COMM_LOSS', 'LOW_PRESSURE', 'HIGH_PRESSURE', 'VALVE_FAULT',
+        'IO_FAULT', 'DEVICE_OFFLINE', 'BATTERY_LOW', 'SENSOR_FAULT',
+        'THRESHOLD_BREACH', 'TAMPER', 'MANUAL'
+      ],
+      default: 'MANUAL'
     }
   }],
 

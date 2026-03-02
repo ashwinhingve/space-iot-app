@@ -16,6 +16,8 @@ import {
   getDevices,
   getDevice,
   updateDevice,
+  createDevice,
+  deleteTTNDevice,
   getUplinks,
   sendDownlink,
   getDownlinks,
@@ -25,6 +27,8 @@ import {
   getGateways,
   getGateway,
   getGatewayStats,
+  updateGateway,
+  deleteGateway,
 } from '../controllers/ttnController';
 
 const router = express.Router();
@@ -45,8 +49,10 @@ router.post('/applications/:applicationId/sync', syncDevices);
 
 // Device routes
 router.get('/applications/:applicationId/devices', getDevices);
+router.post('/applications/:applicationId/devices', createDevice);
 router.get('/applications/:applicationId/devices/:deviceId', getDevice);
 router.put('/applications/:applicationId/devices/:deviceId', updateDevice);
+router.delete('/applications/:applicationId/devices/:deviceId', deleteTTNDevice);
 
 // Uplink routes
 router.get('/applications/:applicationId/uplinks', getUplinks);
@@ -64,6 +70,8 @@ router.get('/applications/:applicationId/logs/export', exportLogs);
 // Gateway routes
 router.get('/applications/:applicationId/gateways', getGateways);
 router.get('/applications/:applicationId/gateways/:gatewayId', getGateway);
+router.put('/applications/:applicationId/gateways/:gatewayId', updateGateway);
+router.delete('/applications/:applicationId/gateways/:gatewayId', deleteGateway);
 router.get('/applications/:applicationId/gateway-stats', getGatewayStats);
 
 // Stats route
