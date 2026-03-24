@@ -35,10 +35,16 @@ export function MainLayout({ children, showFooter = true, padNavbar = true }: Ma
   if (useAppShell) {
     return (
       <div className="flex h-screen overflow-hidden bg-background">
+        <a
+          href="#main-content"
+          className="skip-link"
+        >
+          Skip to main content
+        </a>
         <AppSidebar />
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
           <AppTopBar />
-          <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+          <main id="main-content" className="app-shell-main flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
             {children}
           </main>
         </div>
@@ -49,8 +55,14 @@ export function MainLayout({ children, showFooter = true, padNavbar = true }: Ma
   // ── Public Layout (top navbar) ─────────────────────────────────────────────
   return (
     <div className="min-h-screen flex flex-col bg-background">
+      <a
+        href="#main-content"
+        className="skip-link"
+      >
+        Skip to main content
+      </a>
       <Navbar />
-      <main className={`flex-1 ${padNavbar ? 'pt-16 md:pt-20' : ''}`}>
+      <main id="main-content" className={`app-shell-main flex-1 ${padNavbar ? 'pt-16 md:pt-20' : ''}`}>
         {children}
       </main>
       {showFooter && <Footer />}

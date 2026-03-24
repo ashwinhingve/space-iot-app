@@ -6,19 +6,19 @@ import { motion } from "framer-motion"
 import { buttonVariants as buttonAnimationVariants } from "@/lib/animations"
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center whitespace-nowrap rounded-lg text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center whitespace-nowrap rounded-lg text-sm font-medium transition-all duration-200 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
   {
     variants: {
       variant: {
         default:
-          "bg-primary text-primary-foreground shadow-sm hover:shadow-md hover:shadow-primary/20 hover:bg-primary/90",
+          "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:shadow-md",
         destructive:
-          "bg-destructive text-destructive-foreground shadow-sm hover:shadow-md hover:shadow-destructive/20 hover:bg-destructive/90",
+          "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 hover:shadow-md",
         outline:
-          "border border-border/50 bg-background/50 shadow-sm backdrop-blur-sm hover:bg-secondary/80 hover:border-border transition-colors",
+          "border border-border/60 bg-background/70 shadow-sm backdrop-blur-sm hover:bg-secondary/70 hover:border-border/90 transition-colors",
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/80 shadow-sm",
-        ghost: "hover:bg-secondary/50 hover:text-foreground transition-colors",
+          "bg-secondary text-secondary-foreground hover:bg-secondary/85 shadow-sm",
+        ghost: "hover:bg-secondary/45 hover:text-foreground transition-colors",
         link: "text-primary underline-offset-4 hover:underline",
         // Premium variants
         premium:

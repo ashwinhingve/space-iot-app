@@ -5,6 +5,7 @@
 
 import { Request, Response } from 'express';
 import crypto from 'crypto';
+import XLSX from 'xlsx';
 import { TTNApplication } from '../models/TTNApplication';
 import { TTNDevice } from '../models/TTNDevice';
 import { TTNUplink } from '../models/TTNUplink';
@@ -1548,14 +1549,27 @@ function normalisePhyVersion(raw: string | undefined): string {
   return raw;
 }
 
+function getDeviceAttribute(attributes: unknown, key: string): string {
+  if (!attributes) return '';
+  if (attributes instanceof Map) {
+    const value = attributes.get(key);
+    return value == null ? '' : String(value);
+  }
+  if (typeof attributes === 'object') {
+    const value = (attributes as Record<string, unknown>)[key];
+    return value == null ? '' : String(value);
+  }
+  return '';
+}
+
 /**
- * Export all devices for an application in TTN-compatible CSV or JSON format.
- * GET /api/ttn/applications/:applicationId/devices/export?format=csv|json&ids=id1,id2,...
+ * Export all devices for an application in TTN-compatible CSV/JSON/XLSX format.
+ * GET /api/ttn/applications/:applicationId/devices/export?format=csv|json|xlsx&ids=id1,id2,...
  */
 export const exportDevices = async (req: Request, res: Response) => {
   try {
     const { applicationId } = req.params;
-    const format = (req.query.format as string) || 'csv';
+    const format = ((req.query.format as string) || 'csv').toLowerCase();
     const idsParam = req.query.ids as string | undefined;
 
     const application = await TTNApplication.findOne({
@@ -1578,23 +1592,35 @@ export const exportDevices = async (req: Request, res: Response) => {
     const frequencyPlanId = REGION_FREQUENCY_PLAN[application.ttnRegion] ?? 'EU_863_870_TTN';
     const bandId = REGION_BAND_ID[application.ttnRegion] ?? 'EU_863_870';
 
+    // TTN export fields
+    const HEADERS = [
+      'id', 'dev_eui', 'join_eui', 'name',
+      'frequency_plan_id', 'lorawan_version', 'lorawan_phy_version',
+      'app_key', 'brand_id', 'model_id',
+      'hardware_version', 'firmware_version', 'band_id',
+    ];
+
+    const exportRows = devices.map((d) => ({
+      id: d.deviceId,
+      dev_eui: d.devEui,
+      join_eui: d.joinEui ?? '',
+      name: d.name,
+      frequency_plan_id: frequencyPlanId,
+      lorawan_version: d.lorawanVersion ?? 'MAC_V1_0_3',
+      lorawan_phy_version: normalisePhyVersion(d.lorawanPhyVersion),
+      app_key: '',          // never stored — fill in TTN console
+      brand_id: getDeviceAttribute(d.attributes, 'brand_id') || getDeviceAttribute(d.attributes, 'brand'),
+      model_id: getDeviceAttribute(d.attributes, 'model_id') || getDeviceAttribute(d.attributes, 'model'),
+      hardware_version: getDeviceAttribute(d.attributes, 'hardware_version') || getDeviceAttribute(d.attributes, 'hardwareVersion'),
+      firmware_version: getDeviceAttribute(d.attributes, 'firmware_version') || getDeviceAttribute(d.attributes, 'firmwareVersion'),
+      band_id: bandId,
+    }));
+
     if (format === 'json') {
       // TTN-compatible JSON array
-      const jsonData = devices.map((d) => ({
-        id: d.deviceId,
-        dev_eui: d.devEui,
-        join_eui: d.joinEui ?? '',
-        name: d.name,
-        description: d.description ?? '',
-        frequency_plan_id: frequencyPlanId,
-        lorawan_version: d.lorawanVersion ?? 'MAC_V1_0_3',
-        lorawan_phy_version: normalisePhyVersion(d.lorawanPhyVersion),
-        app_key: '',          // never stored — fill in TTN console
-        brand_id: '',
-        model_id: '',
-        hardware_version: '',
-        firmware_version: '',
-        band_id: bandId,
+      const jsonData = exportRows.map((row, idx) => ({
+        ...row,
+        description: devices[idx].description ?? '',
       }));
 
       res.setHeader('Content-Type', 'application/json');
@@ -1605,30 +1631,40 @@ export const exportDevices = async (req: Request, res: Response) => {
       return res.json(jsonData);
     }
 
-    // ── CSV ───────────────────────────────────────────────────────────────────
-    const HEADERS = [
-      'id', 'dev_eui', 'join_eui', 'name',
-      'frequency_plan_id', 'lorawan_version', 'lorawan_phy_version',
-      'app_key', 'brand_id', 'model_id',
-      'hardware_version', 'firmware_version', 'band_id',
-    ];
+    if (format === 'xlsx' || format === 'excel') {
+      const worksheet = XLSX.utils.json_to_sheet(exportRows, { header: HEADERS });
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'ttn-devices');
+      const xlsxBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 
+      res.setHeader(
+        'Content-Type',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      );
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="ttn-devices-${applicationId}-${Date.now()}.xlsx"`
+      );
+      return res.send(xlsxBuffer);
+    }
+
+    // ── CSV (default) ─────────────────────────────────────────────────────────
     const escape = (v: string) => `"${(v ?? '').replace(/"/g, '""')}"`;
 
-    const rows = devices.map((d) => [
-      escape(d.deviceId),
-      escape(d.devEui),
-      escape(d.joinEui ?? ''),
-      escape(d.name),
-      escape(frequencyPlanId),
-      escape(d.lorawanVersion ?? 'MAC_V1_0_3'),
-      escape(normalisePhyVersion(d.lorawanPhyVersion)),
-      escape(''),  // app_key — never stored
-      escape(''),  // brand_id
-      escape(''),  // model_id
-      escape(''),  // hardware_version
-      escape(''),  // firmware_version
-      escape(bandId),
+    const rows = exportRows.map((row) => [
+      escape(row.id),
+      escape(row.dev_eui),
+      escape(row.join_eui),
+      escape(row.name),
+      escape(row.frequency_plan_id),
+      escape(row.lorawan_version),
+      escape(row.lorawan_phy_version),
+      escape(row.app_key),
+      escape(row.brand_id),
+      escape(row.model_id),
+      escape(row.hardware_version),
+      escape(row.firmware_version),
+      escape(row.band_id),
     ].join(','));
 
     const csv = [HEADERS.join(','), ...rows].join('\r\n');

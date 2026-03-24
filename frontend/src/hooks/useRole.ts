@@ -83,11 +83,25 @@ export const ALL_PAGES: PagePermission[] = [
 ];
 
 const FULL_PERMISSIONS: PagePermission[] = ALL_PAGES;
+const MODULE_PERMISSION_MAP: Record<PermissionModule, PagePermission> = {
+  dashboard: 'dashboard',
+  tickets: 'tickets',
+  projects: 'dashboard',
+  documents: 'documents',
+  billing: 'billing_view',
+  reports: 'reports',
+  devices: 'devices',
+  scada: 'scada',
+  oms: 'oms',
+  users: 'admin',
+  admin: 'admin',
+};
 
 export interface RoleHelpers {
   role: string;
   permissions: PagePermission[];
   isAdmin: boolean;
+  isAdminRole: boolean;
   isEngineer: boolean;
   isOperator: boolean;
   canWrite: boolean;
@@ -102,6 +116,7 @@ export interface RoleHelpers {
 export function useRole(): RoleHelpers {
   const user = useSelector((state: RootState) => state.auth.user);
   const systemMode = useSelector((state: RootState) => state.config.mode);
+  const adminAccessMode = useSelector((state: RootState) => state.config.adminAccessMode);
 
   const isSingleMode = systemMode === 'single';
 
@@ -111,6 +126,7 @@ export function useRole(): RoleHelpers {
       role: 'admin',
       permissions: FULL_PERMISSIONS,
       isAdmin: true,
+      isAdminRole: true,
       isEngineer: true,
       isOperator: true,
       canWrite: true,
@@ -126,34 +142,43 @@ export function useRole(): RoleHelpers {
   // Team mode: use actual stored role + permissions
   const role = (user?.role ?? 'operator') as string;
   const permissions = ((user?.permissions ?? []) as PagePermission[]);
+  const isAdminRole = role === 'admin';
+  const hasAdminBypass = isAdminRole && adminAccessMode === 'super';
 
   const hasPermission = (page: PagePermission): boolean => {
-    if (role === 'admin') return true;
+    if (hasAdminBypass) return true;
     return permissions.includes(page);
   };
 
-  // Fine-grained action check: admin always yes, others check their permissions
+  // Fine-grained action check with optional admin bypass mode.
   const canDo = (module: PermissionModule, action: PermissionAction): boolean => {
-    if (role === 'admin') return true;
-    // Write-capable roles
-    const writeRoles = ['supervisor', 'ews', 'ows', 'engineer'];
-    if (action === 'view') return hasPermission(module as unknown as PagePermission);
-    if (action === 'create' || action === 'edit') return writeRoles.includes(role) && hasPermission(module as unknown as PagePermission);
-    if (action === 'delete') return role === 'admin';
-    if (action === 'approve') return ['supervisor', 'admin'].includes(role);
+    if (hasAdminBypass) return true;
+
+    const pagePermission = MODULE_PERMISSION_MAP[module];
+    const canViewModule = hasPermission(pagePermission);
+    const writeRoles = ['supervisor', 'ews', 'ows', 'engineer', 'admin'];
+
+    if (action === 'view') return canViewModule;
+    if (action === 'create' || action === 'edit') return writeRoles.includes(role) && canViewModule;
+    if (action === 'delete') return role === 'admin' && canViewModule;
+    if (action === 'approve') return ['supervisor', 'admin'].includes(role) && canViewModule;
     return false;
   };
 
-  const writeRoles = ['admin', 'engineer', 'supervisor', 'ews', 'ows'];
+  const writeRoles = ['engineer', 'supervisor', 'ews', 'ows'];
+  const canWrite = hasAdminBypass || writeRoles.includes(role);
+  const canAdmin = hasPermission('admin');
+
   return {
     role,
     permissions,
-    isAdmin: role === 'admin',
+    isAdmin: hasAdminBypass,
+    isAdminRole,
     isEngineer: role === 'engineer' || role === 'ews',
     isOperator: role === 'operator' || role === 'ows',
-    canWrite: writeRoles.includes(role),
-    canAdmin: role === 'admin',
-    isReadOnly: !writeRoles.includes(role),
+    canWrite,
+    canAdmin,
+    isReadOnly: !canWrite,
     isSingleMode: false,
     hasPermission,
     canAccess: hasPermission,

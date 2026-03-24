@@ -83,6 +83,7 @@ const TTNApplication_1 = require("./models/TTNApplication");
 const TTNDevice_1 = require("./models/TTNDevice");
 const ttnService_1 = require("./services/ttnService");
 const roleController_1 = require("./controllers/roleController");
+const securityHeaders_1 = require("./middleware/securityHeaders");
 // Load environment variables
 dotenv_1.default.config();
 // Validate environment variables before proceeding
@@ -99,6 +100,11 @@ const io = new socket_io_1.Server(httpServer, {
     }
 });
 // Middleware - CORS configuration
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+app.use((0, securityHeaders_1.forceHttps)(isProduction && process.env.FORCE_HTTPS !== 'false'));
+app.use((0, securityHeaders_1.securityHeaders)(isProduction));
+app.use((0, securityHeaders_1.secureCookieFlags)(isProduction));
 const corsOptions = {
     origin: (origin, callback) => {
         // Allow requests with no origin (server-to-server, Postman, etc.)

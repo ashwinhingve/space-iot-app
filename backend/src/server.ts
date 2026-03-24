@@ -38,6 +38,7 @@ import { TTNApplication } from './models/TTNApplication';
 import { TTNDevice } from './models/TTNDevice';
 import { ttnService } from './services/ttnService';
 import { seedDefaultRoles } from './controllers/roleController';
+import { forceHttps, secureCookieFlags, securityHeaders } from './middleware/securityHeaders';
 
 // Load environment variables
 dotenv.config();
@@ -60,6 +61,12 @@ const io = new Server(httpServer, {
 });
 
 // Middleware - CORS configuration
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+app.use(forceHttps(isProduction && process.env.FORCE_HTTPS !== 'false'));
+app.use(securityHeaders(isProduction));
+app.use(secureCookieFlags(isProduction));
+
 const corsOptions = {
   origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
     // Allow requests with no origin (server-to-server, Postman, etc.)

@@ -1,9 +1,11 @@
 import mongoose from 'mongoose';
 
 export type SystemMode = 'single' | 'team';
+export type AdminAccessMode = 'super' | 'rbac';
 
 export interface ISystemConfig extends mongoose.Document {
   mode: SystemMode;
+  adminAccessMode: AdminAccessMode;
   companyName?: string;
   updatedBy?: mongoose.Types.ObjectId;
   updatedAt: Date;
@@ -14,6 +16,11 @@ const systemConfigSchema = new mongoose.Schema<ISystemConfig>({
     type: String,
     enum: ['single', 'team'],
     default: 'team',
+  },
+  adminAccessMode: {
+    type: String,
+    enum: ['super', 'rbac'],
+    default: 'super',
   },
   companyName: {
     type: String,

@@ -140,7 +140,8 @@ export function AppSidebar() {
   const router = useRouter();
   const dispatch = useDispatch<AppDispatch>();
   const { user } = useSelector((s: RootState) => s.auth);
-  const { isAdmin, hasPermission } = useRole();
+  const { hasPermission } = useRole();
+  const canAccessAdminPanel = hasPermission('admin');
 
   const isActive = (href: string) => !!(pathname?.startsWith(href));
 
@@ -206,6 +207,7 @@ export function AppSidebar() {
             <button
               onClick={() => setMobileOpen(false)}
               className="ml-auto p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+              aria-label="Close sidebar menu"
             >
               <X className="w-4 h-4" />
             </button>
@@ -246,7 +248,7 @@ export function AppSidebar() {
             </>
           )}
 
-          {isAdmin && (
+          {canAccessAdminPanel && (
             <>
               <SectionLabel label="System" collapsed={isCollapsed} />
               <NavItem
@@ -316,6 +318,7 @@ export function AppSidebar() {
             <button
               onClick={handleLogout}
               title="Sign out"
+              aria-label="Sign out"
               className={`p-2 rounded-xl text-muted-foreground/60 hover:text-red-400 hover:bg-red-500/10 transition-colors ${isCollapsed ? '' : 'ml-auto'}`}
             >
               <LogOut style={{ width: 15, height: 15 }} />
@@ -341,6 +344,7 @@ export function AppSidebar() {
         <motion.button
           className="absolute -right-3 top-16 w-6 h-6 bg-card border border-border/60 rounded-full flex items-center justify-center shadow-sm hover:bg-muted hover:shadow-md transition-all z-10"
           onClick={() => setCollapsed(c => !c)}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.9 }}
         >

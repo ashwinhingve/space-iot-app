@@ -148,6 +148,8 @@ export default function TTNPage() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [downloadError, setDownloadError] = useState('');
   const [downloading, setDownloading] = useState(false);
+  const [exportingDevices, setExportingDevices] = useState(false);
+  const [deviceExportError, setDeviceExportError] = useState('');
   // Create Device modal
   const [showCreateDevice, setShowCreateDevice] = useState(false);
   const [createDeviceForm, setCreateDeviceForm] = useState({
@@ -408,6 +410,40 @@ export default function TTNPage() {
   const handleSyncDevices = async () => {
     if (selectedApplication) {
       await dispatch(syncTTNDevices({ applicationId: selectedApplication.applicationId }));
+    }
+  };
+
+  const handleExportDevices = async (fmt: 'xlsx' | 'csv' | 'json' = 'xlsx') => {
+    if (!selectedApplication) return;
+    setDeviceExportError('');
+    setExportingDevices(true);
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      const params = new URLSearchParams({ format: fmt });
+      const resp = await fetch(
+        `${API_ENDPOINTS.TTN_DEVICES_EXPORT(selectedApplication.applicationId)}?${params.toString()}`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => null);
+        setDeviceExportError(data?.error || 'Device export failed');
+        setTimeout(() => setDeviceExportError(''), 5000);
+        return;
+      }
+
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ttn-devices-${selectedApplication.applicationId}.${fmt}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setDeviceExportError('Device export failed');
+      setTimeout(() => setDeviceExportError(''), 5000);
+    } finally {
+      setExportingDevices(false);
     }
   };
 
@@ -829,21 +865,43 @@ export default function TTNPage() {
                     {tab.label}
                   </button>
                 ))}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleSyncDevices}
-                  disabled={syncLoading || !selectedApplication.hasApiKey}
-                  className="ml-auto"
-                >
-                  {syncLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                  )}
-                  Sync Devices
-                </Button>
+                <div className="ml-auto flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleExportDevices('xlsx')}
+                    disabled={exportingDevices}
+                    className="border-violet-500/30 text-violet-400 hover:bg-violet-500/10"
+                  >
+                    {exportingDevices ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Download className="h-4 w-4 mr-2" />
+                    )}
+                    Export XLSX
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSyncDevices}
+                    disabled={syncLoading || !selectedApplication.hasApiKey}
+                  >
+                    {syncLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                    )}
+                    Sync Devices
+                  </Button>
+                </div>
               </motion.div>
+
+              {deviceExportError && (
+                <div className="mb-4 flex items-center gap-1.5 text-xs text-red-500">
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  {deviceExportError}
+                </div>
+              )}
 
               {/* Content */}
               <AnimatePresence mode="wait">

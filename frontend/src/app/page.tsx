@@ -180,7 +180,7 @@ function HeroDashboard() {
   const metrics = [
     { label: 'Devices Online', value: (247 + (tick % 4 === 0 ? 1 : 0)).toString(), color: BRAND4 },
     { label: 'Streams / sec',  value: (12400 + tick * 17).toLocaleString(),          color: PURPLE },
-    { label: 'System Uptime',  value: '99.97 %',                                     color: GREEN },
+    { label: 'Alert Queue',    value: '3 open',                                       color: GREEN },
   ]
 
   const devices = [
@@ -394,8 +394,8 @@ export default function HomePage() {
               variants={fadeUp}
               className="text-lg md:text-xl max-w-2xl mx-auto mb-10 leading-relaxed text-muted-foreground font-light"
             >
-              WebSCADA-grade industrial monitoring. Connect machines, sensors, and PLCs —
-              visualize live data, trigger alerts, and control systems from any device.
+              Industrial IoT monitoring for machines, sensors, and PLCs.
+              View telemetry, manage alerts, and control connected systems from one interface.
             </motion.p>
 
             {/* CTAs */}
@@ -407,7 +407,7 @@ export default function HomePage() {
               >
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
                 <span className="relative z-10 flex items-center gap-2">
-                  Launch Dashboard <ArrowRight className="h-5 w-5 group-hover:translate-x-0.5 transition-transform" />
+                  Open Dashboard <ArrowRight className="h-5 w-5 group-hover:translate-x-0.5 transition-transform" />
                 </span>
               </Link>
               <Link
@@ -427,8 +427,8 @@ export default function HomePage() {
               {[
                 { v: '247+',   l: 'Devices Online',    color: '#00e5ff' },
                 { v: '12.4k',  l: 'Data Streams/sec',  color: PURPLE },
-                { v: '99.97%', l: 'System Uptime',     color: GREEN },
-                { v: '< 50ms', l: 'Alert Latency',     color: BRAND4 },
+                { v: '24/7',   l: 'Monitoring Window', color: GREEN },
+                { v: 'RBAC',   l: 'Access Model',      color: BRAND4 },
               ].map((s) => (
                 <div key={s.l} className="text-center">
                   <div className="font-display font-bold text-2xl mb-1" style={{ color: s.color }}>{s.v}</div>
@@ -466,11 +466,11 @@ export default function HomePage() {
               <SectionBadge>Live System Overview</SectionBadge>
             </motion.div>
             <motion.h2 variants={fadeUp} className="font-display text-4xl md:text-5xl font-bold text-foreground mb-4">
-              Everything Running.{' '}
+              Current Platform{' '}
               <span className="bg-gradient-to-r from-brand-400 to-brand-500 bg-clip-text text-transparent">Right Now.</span>
             </motion.h2>
             <motion.p variants={fadeUp} className="text-muted-foreground max-w-lg mx-auto">
-              Real-time KPIs from across your industrial infrastructure — no refresh needed.
+              Example KPIs from connected infrastructure, shown as a live dashboard sample.
             </motion.p>
           </motion.div>
 
@@ -481,9 +481,9 @@ export default function HomePage() {
           >
             {[
               { icon: Wifi,          label: 'Devices Online', value: 247,   suffix: '',      accent: BRAND4, note: '98.8% of fleet',         bar: 0.988 },
-              { icon: Activity,      label: 'System Uptime',  value: 99,    suffix: '.97%',  accent: GREEN,  note: '43d 7h continuous',       bar: 0.9997 },
-              { icon: TrendingUp,    label: 'Data Streams',   value: 12400, suffix: '/s',    accent: PURPLE, note: '+4.2% vs yesterday',      bar: null },
-              { icon: AlertTriangle, label: 'Active Alerts',  value: 3,     suffix: '',      accent: AMBER,  note: '2 Warning · 1 Critical',  bar: null },
+              { icon: Activity,      label: 'Monitoring Window', value: 24, suffix: '/7',    accent: GREEN,  note: 'Continuous collection enabled', bar: 1 },
+              { icon: TrendingUp,    label: 'Data Streams',   value: 12400, suffix: '/s',    accent: PURPLE, note: 'Live telemetry ingestion',      bar: null },
+              { icon: AlertTriangle, label: 'Active Alerts',  value: 3,     suffix: '',      accent: AMBER,  note: 'Prioritized incident queue',   bar: null },
             ].map((kpi, i) => (
               <motion.div key={i} variants={fadeUp}>
                 <GlassCard className="p-6">
@@ -517,7 +517,7 @@ export default function HomePage() {
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <h3 className="font-display font-bold text-foreground text-lg">Energy Consumption — 24h</h3>
-                  <p className="text-[12px] text-muted-foreground/60 font-data">kW · Updated every 2 minutes</p>
+                  <p className="text-[12px] text-muted-foreground/60 font-data">kW · Sample stream (2 min interval)</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: BRAND4 }} className="iot-pulse-green" />
@@ -824,7 +824,7 @@ export default function HomePage() {
           >
             {[
               { icon: Sun,     title: 'Solar Farms',            desc: 'Monitor inverter output, panel temp, and grid feed-in. Real-time generation analytics across distributed arrays.', accent: AMBER  },
-              { icon: Train,   title: 'Railway Systems',        desc: 'Track signal health, switch actuators, and power rail telemetry. Safety-critical alerting within 50ms.',           accent: BRAND4 },
+              { icon: Train,   title: 'Railway Systems',        desc: 'Track signal health, switch actuators, and power rail telemetry with centralized event monitoring.',                 accent: BRAND4 },
               { icon: Sprout,  title: 'Agriculture Automation', desc: 'Soil moisture, irrigation schedules, tank levels, and pump control — from field to crop in one view.',             accent: GREEN  },
               { icon: Factory, title: 'Smart Manufacturing',    desc: 'PLC integration, conveyor belt monitoring, machine OEE, and predictive maintenance dashboards.',                   accent: PURPLE },
               { icon: Home,    title: 'Smart Buildings',        desc: 'HVAC, lighting, access control, and energy metering under one roof — all controllable remotely.',                  accent: BRAND4 },
@@ -1136,7 +1136,7 @@ export default function HomePage() {
             <motion.div variants={fadeUp} className="mb-6 flex justify-center">
               <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-secondary/50 border border-border/50">
                 <CheckCircle2 size={14} color={GREEN} />
-                <span className="text-[12px] text-muted-foreground font-data">Ready to deploy in minutes</span>
+                <span className="text-[12px] text-muted-foreground font-data">Deployment-ready architecture</span>
               </div>
             </motion.div>
 
@@ -1157,8 +1157,8 @@ export default function HomePage() {
               variants={fadeUp}
               className="text-[18px] text-muted-foreground max-w-xl mx-auto mb-12 leading-relaxed"
             >
-              Connect your first sensor, configure alerts, and have live dashboards
-              running before your next coffee break.
+              Connect devices, configure alerts, and run SCADA-style dashboards
+              with documented APIs and role-based access control.
             </motion.p>
 
             <motion.div variants={fadeUp} className="flex flex-col sm:flex-row gap-4 justify-center mb-16">
@@ -1170,7 +1170,7 @@ export default function HomePage() {
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
                 <span className="relative z-10 flex items-center gap-3">
                   <Zap size={20} />
-                  Deploy IoT System
+                  Open Dashboard
                 </span>
               </Link>
               <Link
@@ -1189,9 +1189,9 @@ export default function HomePage() {
             >
               {[
                 { icon: Shield,   text: 'TLS Encrypted'      },
-                { icon: Activity, text: '99.97% Uptime SLA'  },
-                { icon: Lock,     text: 'SOC 2 Ready'        },
-                { icon: Zap,      text: '< 50ms Alert Latency' },
+                { icon: Activity, text: 'Real-time telemetry' },
+                { icon: Lock,     text: 'JWT-based auth'      },
+                { icon: Zap,      text: 'REST + WebSocket APIs' },
               ].map((t) => (
                 <div key={t.text} className="flex items-center gap-1.5 text-muted-foreground/50 text-[12px]">
                   <t.icon size={13} className="text-muted-foreground/40" />

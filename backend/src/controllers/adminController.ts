@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { User, UserRole, PagePermission, ALL_ROLES, ROLE_DEFAULT_PERMISSIONS, ALL_PAGES } from '../models/User';
-import { SystemConfig, SystemMode, invalidateSystemModeCache } from '../models/SystemConfig';
+import { AdminAccessMode, SystemConfig, SystemMode, invalidateSystemModeCache } from '../models/SystemConfig';
 
 /**
  * GET /api/admin/users
@@ -386,7 +386,14 @@ export const getSystemConfig = async (req: Request, res: Response) => {
   try {
     let cfg = await SystemConfig.findOne();
     if (!cfg) cfg = await SystemConfig.create({ mode: 'team' });
-    res.json({ success: true, config: { mode: cfg.mode, companyName: cfg.companyName } });
+    res.json({
+      success: true,
+      config: {
+        mode: cfg.mode,
+        adminAccessMode: cfg.adminAccessMode ?? 'super',
+        companyName: cfg.companyName
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch system config' });
   }
@@ -397,24 +404,37 @@ export const getSystemConfig = async (req: Request, res: Response) => {
  */
 export const updateSystemConfig = async (req: Request, res: Response) => {
   try {
-    const { mode, companyName } = req.body;
+    const { mode, adminAccessMode, companyName } = req.body;
 
     if (mode && !['single', 'team'].includes(mode)) {
       return res.status(400).json({ error: 'mode must be "single" or "team"' });
+    }
+    if (adminAccessMode && !['super', 'rbac'].includes(adminAccessMode)) {
+      return res.status(400).json({ error: 'adminAccessMode must be "super" or "rbac"' });
     }
 
     let cfg = await SystemConfig.findOne();
     if (!cfg) cfg = new SystemConfig({ mode: 'team' });
 
     if (mode) cfg.mode = mode as SystemMode;
+    if (adminAccessMode) cfg.adminAccessMode = adminAccessMode as AdminAccessMode;
     if (companyName !== undefined) cfg.companyName = companyName?.trim() || undefined;
     cfg.updatedBy = req.user._id;
     await cfg.save();
 
     invalidateSystemModeCache();
 
-    console.log(`Admin ${req.user.email} changed system mode to ${cfg.mode}`);
-    res.json({ success: true, config: { mode: cfg.mode, companyName: cfg.companyName } });
+    console.log(
+      `Admin ${req.user.email} changed system config: mode=${cfg.mode}, adminAccessMode=${cfg.adminAccessMode ?? 'super'}`
+    );
+    res.json({
+      success: true,
+      config: {
+        mode: cfg.mode,
+        adminAccessMode: cfg.adminAccessMode ?? 'super',
+        companyName: cfg.companyName
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: 'Failed to update system config' });
   }

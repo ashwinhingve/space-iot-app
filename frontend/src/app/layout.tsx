@@ -1,4 +1,5 @@
 import { Inter as FontSans } from 'next/font/google';
+import type { Metadata } from 'next';
 import './globals.css';
 import { Providers } from '@/components/Providers';
 import { LenisProvider } from '@/lib/smoothScroll';
@@ -8,9 +9,41 @@ const fontSans = FontSans({
   variable: '--font-sans',
 });
 
-export const metadata = {
-  title: 'IoT Space',
-  description: 'Monitor and control your IoT devices',
+export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://iot.spaceautotech.com'),
+  title: {
+    default: 'SpaceIoT | Industrial IoT Monitoring Platform',
+    template: '%s | SpaceIoT',
+  },
+  description:
+    'SpaceIoT is an industrial IoT platform for telemetry, SCADA monitoring, alerts, role-based access control, and operational reporting.',
+  applicationName: 'SpaceIoT',
+  keywords: [
+    'industrial iot',
+    'scada monitoring',
+    'iot dashboard',
+    'mqtt platform',
+    'device telemetry',
+    'role based access control',
+  ],
+  robots: {
+    index: true,
+    follow: true,
+  },
+  openGraph: {
+    title: 'SpaceIoT | Industrial IoT Monitoring Platform',
+    description:
+      'Monitor devices, view telemetry, manage alarms, and operate industrial workflows in one platform.',
+    url: '/',
+    siteName: 'SpaceIoT',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'SpaceIoT | Industrial IoT Monitoring Platform',
+    description:
+      'Industrial IoT monitoring, SCADA workflows, real-time alerts, and reporting.',
+  },
 };
 
 export default function RootLayout({

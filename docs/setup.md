@@ -15,7 +15,7 @@ Before you begin, ensure you have the following installed:
 ## Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/your-repo/space-iot-app.git
+git clone https://github.com/ashwinhingve/space-iot-app.git
 cd space-iot-app
 ```
 
@@ -38,7 +38,7 @@ PORT=5000
 NODE_ENV=development
 
 # Frontend URL (for CORS)
-FRONTEND_URL=http://localhost:3000
+FRONTEND_URL=http://localhost:4000
 
 # MongoDB Connection
 MONGODB_URI=mongodb://localhost:27017/iot-space
@@ -104,7 +104,7 @@ npm run build
 npm start
 ```
 
-The frontend will be available at `http://localhost:3000`.
+The frontend will be available at `http://localhost:4000`.
 
 ## Step 4: Database Setup
 
@@ -157,7 +157,7 @@ mosquitto_pub -h localhost -t "test/hello" -m "Hello, MQTT!"
 ## Step 6: Verify Installation
 
 1. **Backend Health Check**: Visit `http://localhost:5000/api/health`
-2. **Frontend**: Visit `http://localhost:3000`
+2. **Frontend**: Visit `http://localhost:4000`
 3. **Create Account**: Register a new user account
 4. **Add Device**: Try adding a test device
 
@@ -203,7 +203,7 @@ kill -9 <PID>
 ### CORS Errors
 
 If you see CORS errors in the browser console, verify that:
-1. `FRONTEND_URL` in backend `.env` matches your frontend URL
+1. `FRONTEND_URL` in backend `.env` matches your frontend URL (`http://localhost:4000` by default)
 2. Both servers are running on the expected ports
 
 ## Next Steps

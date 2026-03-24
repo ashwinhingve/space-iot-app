@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from '@/store/store';
@@ -31,6 +31,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
   const dispatch = useDispatch<AppDispatch>();
   const { isAuthenticated, token, loading } = useSelector((state: RootState) => state.auth);
   const [isInitialized, setIsInitialized] = useState(false);
+  const validatedTokenRef = useRef<string | null>(null);
 
   const isProtectedRoute = protectedRoutes.some(route => pathname?.startsWith(route));
   const isAdminRoute = adminOnlyRoutes.some(route => pathname?.startsWith(route));
@@ -44,12 +45,20 @@ export function AuthGuard({ children }: AuthGuardProps) {
     }
   }, [dispatch, isInitialized]);
 
-  // Verify token with backend when we have a token
+  // Verify token once per token value (prevents re-dispatch loops)
   useEffect(() => {
-    if (isInitialized && token && !loading) {
+    if (!isInitialized) return;
+
+    if (!token) {
+      validatedTokenRef.current = null;
+      return;
+    }
+
+    if (validatedTokenRef.current !== token) {
+      validatedTokenRef.current = token;
       dispatch(getCurrentUser());
     }
-  }, [token, loading, dispatch, isInitialized]);
+  }, [token, dispatch, isInitialized]);
 
   // Handle redirects - check localStorage directly to avoid race conditions
   useEffect(() => {

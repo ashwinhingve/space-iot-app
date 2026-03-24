@@ -8,7 +8,7 @@ import { RoleGuard } from '@/components/RoleGuard';
 import { RoleBadge } from '@/components/RoleBadge';
 import { useRole, UserRole, PagePermission, PermissionModule, PermissionAction, ALL_ROLES, ALL_PAGES, ROLE_LABELS, PAGE_LABELS, ROLE_DEFAULT_PERMISSIONS } from '@/hooks/useRole';
 import { RootState, AppDispatch } from '@/store/store';
-import { fetchSystemConfig, setMode, SystemMode } from '@/store/slices/configSlice';
+import { fetchSystemConfig, setMode, setAdminAccessMode, SystemMode, AdminAccessMode } from '@/store/slices/configSlice';
 import { API_BASE_URL, API_ENDPOINTS } from '@/lib/config';
 import {
   Users, Crown, RefreshCw, Shield, ToggleLeft, ToggleRight,
@@ -836,6 +836,7 @@ export default function AdminPage() {
   const token = useSelector((s: RootState) => s.auth.token);
   const currentUser = useSelector((s: RootState) => s.auth.user);
   const systemMode = useSelector((s: RootState) => s.config.mode);
+  const adminAccessMode = useSelector((s: RootState) => s.config.adminAccessMode);
   const configCompanyName = useSelector((s: RootState) => s.config.companyName);
 
   const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'roles' | 'teams' | 'system' | 'infrastructure'>('overview');
@@ -1078,7 +1079,7 @@ export default function AdminPage() {
     try {
       const res = await fetch(API_ENDPOINTS.SYSTEM_CONFIG, {
         method: 'PATCH', headers: authHeaders,
-        body: JSON.stringify({ mode: systemMode, companyName: companyNameInput }),
+        body: JSON.stringify({ mode: systemMode, adminAccessMode, companyName: companyNameInput }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.message || 'Failed');
@@ -1089,7 +1090,7 @@ export default function AdminPage() {
     } finally {
       setSystemSaving(false);
     }
-  }, [authHeaders, systemMode, companyNameInput, dispatch, showToast]);
+  }, [authHeaders, systemMode, adminAccessMode, companyNameInput, dispatch, showToast]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
   useEffect(() => { setCompanyNameInput(configCompanyName); }, [configCompanyName]);
@@ -1935,6 +1936,62 @@ export default function AdminPage() {
             Single User Mode bypasses all role checks. All users get full admin access.
           </div>
         )}
+
+        <div className="space-y-2 pt-1">
+          <div className="flex items-center gap-2">
+            <Shield className="h-4 w-4 text-muted-foreground" />
+            <h4 className="text-sm font-semibold">Admin Access Mode (Team Mode)</h4>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Choose whether admin role keeps full bypass or follows assigned page permissions in Team Mode.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {(['super', 'rbac'] as AdminAccessMode[]).map(mode => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => dispatch(setAdminAccessMode(mode))}
+                disabled={systemMode === 'single'}
+                className={`flex items-center gap-3 rounded-xl border p-4 text-left transition-all ${
+                  adminAccessMode === mode
+                    ? mode === 'super'
+                      ? 'border-red-500/40 bg-red-500/10'
+                      : 'border-emerald-500/40 bg-emerald-500/10'
+                    : 'border-border/40 hover:border-border/70'
+                } ${systemMode === 'single' ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                <div className={`flex h-9 w-9 items-center justify-center rounded-xl shrink-0 ${
+                  adminAccessMode === mode
+                    ? mode === 'super' ? 'bg-red-500/20' : 'bg-emerald-500/20'
+                    : 'bg-secondary/30'
+                }`}>
+                  {mode === 'super'
+                    ? <Crown className={`h-4 w-4 ${adminAccessMode === mode ? 'text-red-400' : 'text-muted-foreground'}`} />
+                    : <Shield className={`h-4 w-4 ${adminAccessMode === mode ? 'text-emerald-400' : 'text-muted-foreground'}`} />}
+                </div>
+                <div>
+                  <p className={`text-sm font-semibold ${adminAccessMode === mode ? (mode === 'super' ? 'text-red-300' : 'text-emerald-300') : ''}`}>
+                    {mode === 'super' ? 'Super Admin (Full Access)' : 'Strict RBAC for Admin'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {mode === 'super'
+                      ? 'Current behavior: admin bypasses permission checks'
+                      : 'Admin can access only pages explicitly assigned'}
+                  </p>
+                </div>
+                {adminAccessMode === mode && (
+                  <CheckCircle className={`h-4 w-4 ml-auto shrink-0 ${mode === 'super' ? 'text-red-400' : 'text-emerald-400'}`} />
+                )}
+              </button>
+            ))}
+          </div>
+          {systemMode === 'single' && (
+            <div className="text-xs text-muted-foreground">
+              This setting is ignored in Single User Mode and becomes active automatically in Team Mode.
+            </div>
+          )}
+        </div>
+
         <div>
           <label className="block text-xs font-medium text-muted-foreground mb-1.5">Company Name</label>
           <input value={companyNameInput} onChange={e => setCompanyNameInput(e.target.value)}

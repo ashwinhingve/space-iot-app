@@ -2596,3 +2596,64 @@ html.lenis {
   100% { stroke-dashoffset: 0;   opacity: 0.2; }
 }
 .data-flow-path { animation: data-flow 3s ease-in-out infinite; }
+
+/* ============================================
+   UX CONSISTENCY OVERRIDES
+   ============================================ */
+
+@layer base {
+  body {
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.22);
+    color: hsl(var(--foreground));
+  }
+}
+
+/* Skip link for keyboard users */
+.skip-link {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 100;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-size: 0.75rem;
+  font-weight: 600;
+  transform: translateY(-200%);
+  transition: transform 150ms ease;
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+/* App shell scrolling behavior */
+.app-shell-main {
+  scrollbar-gutter: stable both-edges;
+  overscroll-behavior: contain;
+}
+
+/* Replace global transition: all with safer property-based transitions */
+a,
+button,
+input,
+textarea,
+select {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: 180ms;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Unified keyboard focus appearance */
+:where(button, a, input, textarea, select, [role="button"], [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(var(--ring) / 0.42), 0 0 0 4px hsl(var(--background));
+}

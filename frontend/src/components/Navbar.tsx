@@ -10,7 +10,7 @@ import { ThemeToggle } from '@/components/ThemeToggle'
 import { logout } from '@/store/slices/authSlice'
 import { RootState } from '@/store/store'
 import { AppDispatch } from '@/store/store'
-import { motion, AnimatePresence, useMotionValue, useTransform, useSpring } from 'framer-motion'
+import { motion, AnimatePresence, useMotionValue, useSpring, useScroll } from 'framer-motion'
 import { useRole, PagePermission } from '@/hooks/useRole'
 import { RoleBadge } from '@/components/RoleBadge'
 
@@ -31,7 +31,8 @@ const ALL_NAV_LINKS: { name: string; href: string; permission: PagePermission }[
 
 export function Navbar() {
   const { user } = useSelector((state: RootState) => state.auth)
-  const { isAdmin, role, hasPermission } = useRole()
+  const { role, hasPermission } = useRole()
+  const canAccessAdminPanel = hasPermission('admin')
 
   // Permission-based nav links for authenticated users
   const navLinks = user
@@ -47,6 +48,7 @@ export function Navbar() {
   const [isVisible, setIsVisible] = useState(true)
   const [isScrolled, setIsScrolled] = useState(false)
   const [lastScrollY, setLastScrollY] = useState(0)
+  const { scrollYProgress } = useScroll()
 
   // Smooth spring animation for navbar position
   const navY = useMotionValue(0)
@@ -137,11 +139,7 @@ export function Navbar() {
         <motion.div
           className="absolute bottom-0 left-0 h-[2px] bg-gradient-to-r from-brand-500 to-purple-500"
           style={{
-            scaleX: useTransform(
-              useMotionValue(typeof window !== 'undefined' ? window.scrollY : 0),
-              [0, typeof document !== 'undefined' ? document.body.scrollHeight - window.innerHeight : 1000],
-              [0, 1]
-            ),
+            scaleX: scrollYProgress,
             transformOrigin: 'left',
           }}
         />
@@ -197,7 +195,7 @@ export function Navbar() {
                 )
               })}
             </div>
-            {isAdmin && (
+            {canAccessAdminPanel && (
               <Link
                 href="/admin"
                 className={`flex items-center gap-1.5 px-3 py-2 rounded-full text-sm font-medium transition-all duration-300 border ${
@@ -223,6 +221,8 @@ export function Navbar() {
                     e.stopPropagation()
                     setIsUserMenuOpen(!isUserMenuOpen)
                   }}
+                  aria-haspopup="menu"
+                  aria-expanded={isUserMenuOpen}
                   className="flex items-center gap-2 px-3 py-2 rounded-full bg-muted/30 border border-border/30 hover:bg-muted/50 transition-all duration-300"
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
@@ -272,7 +272,7 @@ export function Navbar() {
                           <Settings className="h-4 w-4" />
                           My Devices
                         </Link>
-                        {isAdmin && (
+                        {canAccessAdminPanel && (
                           <Link
                             href="/admin"
                             className="flex items-center gap-3 px-3 py-2.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-xl transition-all duration-200"
@@ -327,6 +327,7 @@ export function Navbar() {
               className="lg:hidden flex items-center justify-center w-10 h-10 rounded-full bg-muted/30 border border-border/30 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all duration-300"
               onClick={() => setIsMenuOpen(!isMenuOpen)}
               whileTap={{ scale: 0.95 }}
+              aria-expanded={isMenuOpen}
               aria-label={isMenuOpen ? 'Close menu' : 'Open menu'}
             >
               <AnimatePresence mode="wait">
@@ -426,7 +427,7 @@ export function Navbar() {
                     </motion.div>
                   )
                 })}
-                {isAdmin && (
+                {canAccessAdminPanel && (
                   <motion.div
                     initial={{ opacity: 0, x: 20 }}
                     animate={{ opacity: 1, x: 0 }}
