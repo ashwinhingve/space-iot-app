@@ -4,22 +4,39 @@ import { useState, useEffect, useCallback } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { Menu, X, ChevronRight, ChevronDown, LogOut, Settings, LayoutDashboard } from 'lucide-react'
+import { Menu, X, ChevronRight, ChevronDown, LogOut, Settings, LayoutDashboard, Crown, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { logout } from '@/store/slices/authSlice'
 import { RootState } from '@/store/store'
 import { AppDispatch } from '@/store/store'
 import { motion, AnimatePresence, useMotionValue, useTransform, useSpring } from 'framer-motion'
+import { useRole, PagePermission } from '@/hooks/useRole'
+import { RoleBadge } from '@/components/RoleBadge'
 
-const navLinks = [
-  { name: 'Dashboard', href: '/dashboard' },
-  { name: 'Devices', href: '/devices' },
-  { name: 'Documentation', href: '/documentation' },
+// Public links shown to unauthenticated users
+const publicNavLinks = [
+  { name: 'Features', href: '/#features' },
+]
+
+const ALL_NAV_LINKS: { name: string; href: string; permission: PagePermission }[] = [
+  { name: 'Dashboard', href: '/dashboard', permission: 'dashboard'    },
+  { name: 'Devices',   href: '/devices',   permission: 'devices'      },
+  { name: 'SCADA',     href: '/scada',     permission: 'scada'        },
+  { name: 'OMS',       href: '/oms',       permission: 'oms'          },
+  { name: 'Reports',   href: '/reports',   permission: 'reports'      },
+  { name: 'Tickets',   href: '/tickets',   permission: 'tickets'      },
+  { name: 'Documents', href: '/documents', permission: 'documents'    },
 ]
 
 export function Navbar() {
   const { user } = useSelector((state: RootState) => state.auth)
+  const { isAdmin, role, hasPermission } = useRole()
+
+  // Permission-based nav links for authenticated users
+  const navLinks = user
+    ? ALL_NAV_LINKS.filter(link => hasPermission(link.permission))
+    : publicNavLinks
   const dispatch = useDispatch<AppDispatch>()
   const router = useRouter()
   const pathname = usePathname()
@@ -131,18 +148,28 @@ export function Navbar() {
 
         <div className="container flex h-16 md:h-20 items-center justify-between px-4 md:px-6">
           {/* Logo */}
-          <Link href="/" className="flex items-center group relative z-10">
-            <motion.span
-              className="font-bold text-xl md:text-2xl bg-gradient-to-r from-brand-500 via-purple-500 to-brand-600 bg-clip-text text-transparent"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+          <Link href="/" className="flex items-center gap-2.5 group relative z-10">
+            <motion.div
+              className="relative"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
             >
-              IoT Space
+              <div className="absolute inset-0 bg-[#00e5ff]/30 rounded-lg blur-md group-hover:bg-[#00e5ff]/50 transition-all duration-300" />
+              <div className="relative w-8 h-8 rounded-lg bg-gradient-to-br from-[#00e5ff] to-brand-600 flex items-center justify-center shadow-[0_0_16px_rgba(0,229,255,0.35)]">
+                <Zap className="w-4 h-4 text-white" strokeWidth={2.5} />
+              </div>
+            </motion.div>
+            <motion.span
+              className="font-display font-bold text-[1.35rem] leading-none tracking-wide"
+              whileHover={{ scale: 1.01 }}
+            >
+              <span className="text-foreground">Space</span>
+              <span className="text-[#00e5ff]">IoT</span>
             </motion.span>
           </Link>
 
           {/* Desktop Navigation */}
-          <div className="hidden lg:flex items-center">
+          <div className="hidden lg:flex items-center gap-2">
             <div className="flex items-center bg-muted/30 backdrop-blur-sm rounded-full p-1.5 border border-border/30">
               {navLinks.map((link) => {
                 const isActive = isActiveLink(link.href)
@@ -170,6 +197,19 @@ export function Navbar() {
                 )
               })}
             </div>
+            {isAdmin && (
+              <Link
+                href="/admin"
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-full text-sm font-medium transition-all duration-300 border ${
+                  isActiveLink('/admin')
+                    ? 'bg-red-500/15 border-red-500/30 text-red-400'
+                    : 'border-red-500/20 text-red-400/70 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30'
+                }`}
+              >
+                <Crown className="h-3.5 w-3.5" />
+                Admin
+              </Link>
+            )}
           </div>
 
           {/* Right Section */}
@@ -211,7 +251,10 @@ export function Navbar() {
                       className="absolute right-0 mt-2 w-56 bg-background/95 backdrop-blur-xl rounded-2xl border border-border/50 shadow-xl shadow-black/10 overflow-hidden"
                     >
                       <div className="p-3 border-b border-border/50">
-                        <p className="text-sm font-medium text-foreground truncate">{user.name}</p>
+                        <div className="flex items-center justify-between gap-2 mb-0.5">
+                          <p className="text-sm font-medium text-foreground truncate">{user.name}</p>
+                          <RoleBadge role={role} size="sm" />
+                        </div>
                         <p className="text-xs text-muted-foreground truncate">{user.email}</p>
                       </div>
                       <div className="p-2">
@@ -229,6 +272,15 @@ export function Navbar() {
                           <Settings className="h-4 w-4" />
                           My Devices
                         </Link>
+                        {isAdmin && (
+                          <Link
+                            href="/admin"
+                            className="flex items-center gap-3 px-3 py-2.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-xl transition-all duration-200"
+                          >
+                            <Crown className="h-4 w-4" />
+                            Admin Panel
+                          </Link>
+                        )}
                       </div>
                       <div className="p-2 border-t border-border/50">
                         <button
@@ -254,16 +306,18 @@ export function Navbar() {
                   <Link href="/login">Sign in</Link>
                 </Button>
                 <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                  <Button
-                    size="sm"
-                    asChild
-                    className="bg-gradient-to-r from-brand-500 to-purple-500 hover:from-brand-600 hover:to-purple-600 text-white border-0 rounded-full px-5 shadow-lg shadow-brand-500/25 hover:shadow-brand-500/40 transition-all duration-300"
-                  >
-                    <Link href="/register" className="flex items-center gap-1">
-                      Get Started
-                      <ChevronRight className="h-4 w-4" />
-                    </Link>
-                  </Button>
+                  <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                    <Button
+                      size="sm"
+                      asChild
+                      className="bg-gradient-to-r from-brand-500 to-purple-500 hover:from-brand-600 hover:to-purple-600 text-white border-0 rounded-full px-5 shadow-lg shadow-brand-500/25 hover:shadow-brand-500/40 transition-all duration-300"
+                    >
+                      <Link href="/register" className="flex items-center gap-1">
+                        Register
+                        <ChevronRight className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                  </motion.div>
                 </motion.div>
               </div>
             )}
@@ -327,9 +381,15 @@ export function Navbar() {
             >
               {/* Header */}
               <div className="flex items-center justify-between p-6 border-b border-border/50">
-                <span className="font-bold text-xl bg-gradient-to-r from-brand-500 via-purple-500 to-brand-600 bg-clip-text text-transparent">
-                  IoT Space
-                </span>
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#00e5ff] to-brand-600 flex items-center justify-center shadow-[0_0_12px_rgba(0,229,255,0.3)]">
+                    <Zap className="w-4 h-4 text-white" strokeWidth={2.5} />
+                  </div>
+                  <span className="font-display font-bold text-xl">
+                    <span className="text-foreground">Space</span>
+                    <span className="text-[#00e5ff]">IoT</span>
+                  </span>
+                </div>
                 <motion.button
                   className="flex items-center justify-center w-10 h-10 rounded-full bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
                   onClick={() => setIsMenuOpen(false)}
@@ -366,6 +426,29 @@ export function Navbar() {
                     </motion.div>
                   )
                 })}
+                {isAdmin && (
+                  <motion.div
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: navLinks.length * 0.05 + 0.1 }}
+                  >
+                    <Link
+                      href="/admin"
+                      className={`flex items-center justify-between py-4 px-4 rounded-2xl text-lg font-medium transition-all duration-300 ${
+                        isActiveLink('/admin')
+                          ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                          : 'text-red-400/70 hover:text-red-400 hover:bg-red-500/10'
+                      }`}
+                      onClick={() => setIsMenuOpen(false)}
+                    >
+                      <span className="flex items-center gap-2">
+                        <Crown className="h-5 w-5" />
+                        Admin
+                      </span>
+                      <ChevronRight className="h-5 w-5" />
+                    </Link>
+                  </motion.div>
+                )}
               </div>
 
               {/* User Section */}
@@ -378,11 +461,14 @@ export function Navbar() {
                     className="space-y-4"
                   >
                     <div className="flex items-center gap-3 p-4 bg-muted/30 rounded-2xl">
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-brand-500 to-purple-500 flex items-center justify-center text-white text-lg font-semibold">
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-brand-500 to-purple-500 flex items-center justify-center text-white text-lg font-semibold shrink-0">
                         {user.name?.charAt(0).toUpperCase() || 'U'}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-foreground truncate">{user.name}</p>
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <p className="font-semibold text-foreground truncate">{user.name}</p>
+                          <RoleBadge role={role} size="sm" />
+                        </div>
                         <p className="text-sm text-muted-foreground truncate">{user.email}</p>
                       </div>
                     </div>
@@ -416,7 +502,7 @@ export function Navbar() {
                       asChild
                       className="w-full justify-center bg-gradient-to-r from-brand-500 to-purple-500 text-white border-0 rounded-xl h-12"
                     >
-                      <Link href="/register" onClick={() => setIsMenuOpen(false)}>Get Started</Link>
+                      <Link href="/register" onClick={() => setIsMenuOpen(false)}>Register</Link>
                     </Button>
                   </motion.div>
                 )}

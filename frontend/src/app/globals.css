@@ -1,5 +1,23 @@
 /* stylelint-disable */
 @import 'leaflet/dist/leaflet.css';
+
+/* ============================================
+   SIDEBAR APP SHELL — LAYOUT UTILITIES
+   ============================================ */
+
+/* Thin scrollbar for sidebar nav */
+.sidebar-nav::-webkit-scrollbar { width: 0; }
+.sidebar-nav { scrollbar-width: none; }
+
+/* Page content scrollbar — subtle and thin */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 100px;
+}
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.4); }
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -91,8 +109,11 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: 'Plus Jakarta Sans', sans-serif;
   }
 }
+
+.font-body { font-family: 'Plus Jakarta Sans', sans-serif; }
 
 html {
   scroll-behavior: smooth;
@@ -2426,3 +2447,152 @@ html.lenis {
   transform: translateY(0);
   opacity: 1;
 }
+
+/* ============================================
+   IOT PLATFORM — LANDING PAGE ANIMATIONS
+   ============================================ */
+
+@keyframes iot-scan {
+  0%   { transform: translateY(-100%); opacity: 0.6; }
+  50%  { opacity: 1; }
+  100% { transform: translateY(100vh); opacity: 0; }
+}
+
+@keyframes iot-pulse-dot {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.6); }
+  50%       { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+}
+
+@keyframes iot-pulse-cyan {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.6); }
+  50%       { box-shadow: 0 0 0 6px rgba(0, 229, 255, 0); }
+}
+
+@keyframes iot-float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-10px); }
+}
+
+@keyframes iot-number-glow {
+  0%, 100% { text-shadow: 0 0 20px rgba(0, 229, 255, 0.4); }
+  50%       { text-shadow: 0 0 40px rgba(0, 229, 255, 0.9), 0 0 80px rgba(0, 229, 255, 0.4); }
+}
+
+@keyframes iot-dash-flow {
+  to { stroke-dashoffset: -24; }
+}
+
+@keyframes iot-gradient-pan {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes iot-beacon {
+  0%   { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(3); opacity: 0; }
+}
+
+.iot-scan-line {
+  animation: iot-scan 4s linear infinite;
+}
+
+.iot-pulse-green {
+  animation: iot-pulse-dot 2s ease-in-out infinite;
+}
+
+.iot-pulse-cyan {
+  animation: iot-pulse-cyan 2s ease-in-out infinite;
+}
+
+.iot-float {
+  animation: iot-float 6s ease-in-out infinite;
+}
+
+.iot-number-glow {
+  animation: iot-number-glow 3s ease-in-out infinite;
+}
+
+.iot-gradient-pan {
+  background-size: 200% 200%;
+  animation: iot-gradient-pan 6s ease infinite;
+}
+
+.font-display { font-family: 'Rajdhani', sans-serif; }
+.font-data    { font-family: 'JetBrains Mono', monospace; }
+
+/* ============================================
+   AUTH LEFT PANEL — CIRCUIT SCAN LINE
+   ============================================ */
+
+@keyframes auth-scan {
+  0%   { transform: translateY(-10px); opacity: 0; }
+  5%   { opacity: 1; }
+  92%  { opacity: 0.7; }
+  100% { transform: translateY(calc(100vh + 10px)); opacity: 0; }
+}
+
+.auth-scan-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(0, 229, 255, 0.3) 15%,
+    rgba(0, 229, 255, 0.85) 50%,
+    rgba(0, 229, 255, 0.3) 85%,
+    transparent 100%
+  );
+  animation: auth-scan 6s ease-in-out infinite;
+  animation-delay: 0.8s;
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.5), 0 0 40px rgba(0, 229, 255, 0.2);
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* ============================================
+   HOMEPAGE HERO — ENHANCED EFFECTS
+   ============================================ */
+
+@keyframes hero-scan {
+  0%   { transform: translateY(-10px); opacity: 0; }
+  5%   { opacity: 0.6; }
+  95%  { opacity: 0.6; }
+  100% { transform: translateY(400px); opacity: 0; }
+}
+
+.hero-scan-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(99, 102, 241, 0.2) 20%,
+    rgba(99, 102, 241, 0.6) 50%,
+    rgba(99, 102, 241, 0.2) 80%,
+    transparent 100%
+  );
+  animation: hero-scan 8s ease-in-out infinite;
+  animation-delay: 2s;
+  pointer-events: none;
+}
+
+/* Data node pulse for auth panel */
+@keyframes node-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50%       { opacity: 1;   transform: scale(1.4); }
+}
+.node-pulse-1 { animation: node-pulse 2.5s ease-in-out infinite; }
+.node-pulse-2 { animation: node-pulse 2.5s ease-in-out infinite; animation-delay: 0.8s; }
+.node-pulse-3 { animation: node-pulse 2.5s ease-in-out infinite; animation-delay: 1.6s; }
+
+/* Data flow line animation */
+@keyframes data-flow {
+  0%   { stroke-dashoffset: 120; opacity: 0.2; }
+  50%  { opacity: 0.8; }
+  100% { stroke-dashoffset: 0;   opacity: 0.2; }
+}
+.data-flow-path { animation: data-flow 3s ease-in-out infinite; }

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 
@@ -33,6 +33,12 @@ interface Props {
 }
 
 export default function CommandAreaMap({ manifolds }: Props) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // Filter manifolds that have valid non-zero coordinates
   const mappable = useMemo(
     () =>
@@ -64,6 +70,14 @@ export default function CommandAreaMap({ manifolds }: Props) {
     if (status === 'Maintenance') return '#f59e0b';
     return '#64748b';
   };
+
+  if (!mounted) {
+    return (
+      <div className="h-[480px] flex items-center justify-center rounded-xl border border-border/50 bg-card/30 text-muted-foreground text-sm">
+        Loading map…
+      </div>
+    );
+  }
 
   return (
     <div className="relative rounded-xl overflow-hidden border border-border/50" style={{ height: 480 }}>

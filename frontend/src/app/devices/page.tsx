@@ -9,9 +9,9 @@ import {
   Radio, Wifi, Bluetooth, Signal, Plus, Network, RefreshCw,
   X, Loader2, AlertCircle,
   Pencil, Trash2, Check, Satellite, Server, MapPin,
+  Download, FileDown, CheckSquare, Square, FileJson, FileText as FileCsv, Info,
 } from 'lucide-react';
 import { MainLayout } from '@/components/MainLayout';
-import AnimatedBackground from '@/components/AnimatedBackground';
 import { AppDispatch, RootState } from '@/store/store';
 import {
   fetchNetworkDevices,
@@ -36,6 +36,7 @@ import {
   TTNGateway,
 } from '@/store/slices/ttnSlice';
 import { fetchManifolds } from '@/store/slices/manifoldSlice';
+import { API_ENDPOINTS } from '@/lib/config';
 import { DeviceSection } from '@/components/network-devices/DeviceSection';
 import { AddDeviceModal } from '@/components/network-devices/AddDeviceModal';
 import { LoRaWANCard } from '@/components/network-devices/LoRaWANCard';
@@ -202,7 +203,7 @@ function CreateDeviceModal({
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className={labelClass}>Device ID *</label>
                   <input
@@ -237,7 +238,7 @@ function CreateDeviceModal({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className={labelClass}>Dev EUI * <span className="normal-case font-normal text-muted-foreground/60">(16 hex)</span></label>
                   <input
@@ -273,7 +274,7 @@ function CreateDeviceModal({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className={labelClass}>LoRaWAN Version</label>
                   <select
@@ -552,6 +553,262 @@ function GatewaySection({
   );
 }
 
+// ─── Export Modal ─────────────────────────────────────────────────────────────
+
+function ExportModal({
+  open,
+  application,
+  devices,
+  onClose,
+}: {
+  open: boolean;
+  application: TTNApplication | null;
+  devices: TTNDevice[];
+  onClose: () => void;
+}) {
+  const [format, setFormat] = useState<'csv' | 'json'>('csv');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState(false);
+  const [allSelected, setAllSelected] = useState(true);
+
+  // Reset when modal opens
+  React.useEffect(() => {
+    if (open) {
+      setAllSelected(true);
+      setSelectedIds(new Set());
+      setFormat('csv');
+    }
+  }, [open]);
+
+  const effectiveIds = allSelected ? devices.map((d) => d.deviceId) : Array.from(selectedIds);
+
+  const toggleDevice = (id: string) => {
+    setAllSelected(false);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setAllSelected(false);
+      setSelectedIds(new Set());
+    } else {
+      setAllSelected(true);
+      setSelectedIds(new Set());
+    }
+  };
+
+  const handleExport = async () => {
+    if (!application || effectiveIds.length === 0) return;
+    setExporting(true);
+    try {
+      const token = localStorage.getItem('token');
+      const ids = allSelected ? '' : effectiveIds.join(',');
+      const url = `${API_ENDPOINTS.TTN_DEVICES_EXPORT(application.applicationId)}?format=${format}${ids ? `&ids=${ids}` : ''}`;
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = `ttn-devices-${application.applicationId}-${new Date().toISOString().split('T')[0]}.${format}`;
+      a.click();
+      URL.revokeObjectURL(href);
+      onClose();
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const selectedCount = allSelected ? devices.length : selectedIds.size;
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+          <motion.div
+            className="relative bg-card border border-border/60 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
+            initial={{ scale: 0.96, y: 12 }}
+            animate={{ scale: 1, y: 0 }}
+            exit={{ scale: 0.96, y: 12 }}
+          >
+            {/* Header accent */}
+            <div className="h-px bg-gradient-to-r from-violet-400 via-brand-500 to-cyan-400" />
+
+            {/* Header */}
+            <div className="px-6 pt-5 pb-4 flex items-center justify-between border-b border-border/40 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-violet-500/10 border border-violet-500/20">
+                  <FileDown className="w-4 h-4 text-violet-400" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold">Export Devices</h2>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    {application?.name} · TTN-compatible format
+                  </p>
+                </div>
+              </div>
+              <button onClick={onClose} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="px-6 py-5 space-y-5 overflow-y-auto flex-1">
+
+              {/* Format picker */}
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Export Format</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { key: 'csv' as const, Icon: FileCsv, label: 'CSV', desc: 'Import directly into TTN console' },
+                    { key: 'json' as const, Icon: FileJson, label: 'JSON', desc: 'Structured data for scripting' },
+                  ]).map(({ key, Icon, label, desc }) => (
+                    <button
+                      key={key}
+                      onClick={() => setFormat(key)}
+                      className={`flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
+                        format === key
+                          ? 'border-violet-500/40 bg-violet-500/10 ring-1 ring-violet-500/20'
+                          : 'border-border/40 bg-muted/20 hover:border-border/60'
+                      }`}
+                    >
+                      <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${format === key ? 'text-violet-400' : 'text-muted-foreground'}`} />
+                      <div>
+                        <p className={`text-sm font-semibold ${format === key ? 'text-violet-400' : ''}`}>{label}</p>
+                        <p className="text-[10px] text-muted-foreground/70 mt-0.5">{desc}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Device selection */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                    Select Devices
+                  </p>
+                  <button
+                    onClick={toggleAll}
+                    className="flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors"
+                  >
+                    {allSelected
+                      ? <><CheckSquare className="w-3.5 h-3.5" />Deselect All</>
+                      : <><Square className="w-3.5 h-3.5" />Select All</>
+                    }
+                  </button>
+                </div>
+
+                {devices.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-4">No devices in this application.</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    {devices.map((d) => {
+                      const checked = allSelected || selectedIds.has(d.deviceId);
+                      return (
+                        <button
+                          key={d._id}
+                          onClick={() => toggleDevice(d.deviceId)}
+                          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-all ${
+                            checked
+                              ? 'border-violet-500/30 bg-violet-500/5'
+                              : 'border-border/30 bg-muted/10 hover:border-border/50'
+                          }`}
+                        >
+                          {checked
+                            ? <CheckSquare className="w-4 h-4 text-violet-400 shrink-0" />
+                            : <Square className="w-4 h-4 text-muted-foreground/40 shrink-0" />
+                          }
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{d.name}</p>
+                            <p className="text-[10px] font-mono text-muted-foreground/60 truncate">{d.deviceId}</p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-[10px] font-mono text-muted-foreground/50 truncate max-w-[100px]">{d.devEui}</p>
+                            <span className={`text-[9px] font-bold ${d.isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>
+                              {d.isOnline ? '● ONLINE' : '○ OFFLINE'}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* AppKey warning */}
+              <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 text-xs text-amber-400/90">
+                <Info className="w-4 h-4 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold mb-0.5">AppKey not included</p>
+                  <p className="text-amber-400/70 leading-relaxed">
+                    AppKeys are secrets managed by TTN and are never stored here. After importing into TTN,
+                    you must configure each device&apos;s AppKey separately in the TTN console or OTAA credentials.
+                  </p>
+                </div>
+              </div>
+
+              {/* CSV field preview */}
+              {format === 'csv' && (
+                <div className="rounded-xl border border-border/40 bg-muted/20 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Exported columns</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {['id','dev_eui','join_eui','name','frequency_plan_id','lorawan_version','lorawan_phy_version','app_key*','brand_id','model_id','hardware_version','firmware_version','band_id'].map((col) => (
+                      <span key={col} className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+                        col === 'app_key*'
+                          ? 'border-amber-500/30 bg-amber-500/10 text-amber-400'
+                          : 'border-border/40 bg-muted/30 text-muted-foreground'
+                      }`}>{col}</span>
+                    ))}
+                  </div>
+                  <p className="text-[9px] text-muted-foreground/50 mt-2">* app_key column will be empty</p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 pb-5 pt-4 flex items-center justify-between border-t border-border/40 shrink-0">
+              <span className="text-xs text-muted-foreground">
+                <span className="font-bold text-foreground">{selectedCount}</span> device{selectedCount !== 1 ? 's' : ''} selected
+              </span>
+              <div className="flex gap-2.5">
+                <button
+                  onClick={onClose}
+                  disabled={exporting}
+                  className="px-4 py-2 text-sm rounded-xl border border-border/50 hover:bg-muted transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleExport}
+                  disabled={exporting || selectedCount === 0}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-violet-500/10 text-violet-400 border border-violet-500/25 rounded-xl hover:bg-violet-500/20 transition-all disabled:opacity-50"
+                >
+                  {exporting
+                    ? <Loader2 className="w-4 h-4 animate-spin" />
+                    : <Download className="w-4 h-4" />
+                  }
+                  Export {format.toUpperCase()}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 // ─── LoRaWAN Section ──────────────────────────────────────────────────────────
 
 function LoRaWANSection({
@@ -565,6 +822,7 @@ function LoRaWANSection({
   onSync,
   onDeviceClick,
   onCreateDevice,
+  onExport,
   onRenameGateway,
   onDeleteGateway,
 }: {
@@ -578,6 +836,7 @@ function LoRaWANSection({
   onSync: () => void;
   onDeviceClick: (device: TTNDevice) => void;
   onCreateDevice: () => void;
+  onExport: () => void;
   onRenameGateway: (gw: TTNGateway, name: string) => Promise<void>;
   onDeleteGateway: (gw: TTNGateway) => void;
 }) {
@@ -647,6 +906,13 @@ function LoRaWANSection({
               >
                 <Plus className="w-4 h-4" />
                 New Device
+              </button>
+              <button
+                onClick={onExport}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-violet-500/10 text-violet-400 border border-violet-500/20 rounded-xl hover:bg-violet-500/20 transition-all"
+              >
+                <Download className="w-4 h-4" />
+                Export
               </button>
             </>
           )}
@@ -804,6 +1070,8 @@ export default function DevicesPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<NetworkDevice | null>(null);
   // Create LoRaWAN device modal
   const [createDeviceOpen, setCreateDeviceOpen] = useState(false);
+  // Export modal
+  const [exportModalOpen, setExportModalOpen] = useState(false);
 
   // ── Real-time Socket.io TTN connection ────────────────────────────────────
   useSocketTTN(selectedApplication?.applicationId);
@@ -931,10 +1199,7 @@ export default function DevicesPage() {
 
   return (
     <MainLayout>
-      <div className="relative min-h-screen">
-        <AnimatedBackground variant="subtle" showParticles={true} showGradientOrbs={true} />
-
-        <div className="relative z-10 container mx-auto px-4 py-6 md:py-8 max-w-7xl space-y-6">
+      <div className="container mx-auto px-4 py-6 md:py-8 max-w-7xl space-y-6">
 
           {/* ── Global toast notifications ─────────────────────────────── */}
           <AnimatePresence>
@@ -965,7 +1230,7 @@ export default function DevicesPage() {
                     <Network className="h-6 w-6 text-brand-600 dark:text-brand-400" />
                   </div>
                 </div>
-                <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-foreground via-foreground to-muted-foreground">
+                <h1 className="text-2xl sm:text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-foreground via-foreground to-muted-foreground">
                   Network Devices
                 </h1>
               </div>
@@ -983,9 +1248,44 @@ export default function DevicesPage() {
             </button>
           </motion.div>
 
+          {/* ── Network health bar ────────────────────────────────────── */}
+          {displayStats && (
+            <motion.div
+              className="flex flex-wrap gap-4 px-5 py-3.5 rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm text-xs text-muted-foreground"
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.08 }}
+            >
+              <span className="font-semibold text-foreground/80 uppercase tracking-widest text-[10px] self-center">Network Health</span>
+              {[
+                { label: 'LoRaWAN', online: ttnDevices.filter((d) => d.isOnline).length, total: ttnDevices.length, color: 'text-violet-400' },
+                { label: 'Wi-Fi', online: devices.filter((d) => d.protocol === 'wifi' && d.status === 'online').length, total: (displayStats.wifi ?? 0), color: 'text-sky-400' },
+                { label: 'GSM', online: devices.filter((d) => d.protocol === 'gsm' && d.status === 'online').length, total: (displayStats.gsm ?? 0), color: 'text-emerald-400' },
+                { label: 'Bluetooth', online: devices.filter((d) => d.protocol === 'bluetooth' && d.status === 'online').length, total: (displayStats.bluetooth ?? 0), color: 'text-blue-400' },
+              ].map(({ label, online, total, color }) => (
+                <div key={label} className="flex items-center gap-2">
+                  <span>{label}:</span>
+                  <span className={`font-bold ${color}`}>{online}</span>
+                  <span className="text-muted-foreground/50">/ {total} online</span>
+                  {total > 0 && (
+                    <div className="h-1.5 w-16 rounded-full bg-muted/30 overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${Math.min((online / total) * 100, 100)}%`,
+                          background: online === total ? '#10b981' : online === 0 ? '#64748b' : '#f59e0b',
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </motion.div>
+          )}
+
           {/* ── Stats bar / Tab navigation (unified) ──────────────────── */}
           <motion.div
-            className="grid grid-cols-3 sm:grid-cols-5 gap-3"
+            className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1, duration: 0.4 }}
@@ -1048,6 +1348,7 @@ export default function DevicesPage() {
                   onSync={() => selectedApplication && dispatch(syncTTNDevices({ applicationId: selectedApplication.applicationId }))}
                   onDeviceClick={handleDeviceClick}
                   onCreateDevice={() => setCreateDeviceOpen(true)}
+                  onExport={() => setExportModalOpen(true)}
                   onRenameGateway={handleRenameGateway}
                   onDeleteGateway={(gw) => setDeleteGatewayConfirm(gw)}
                 />
@@ -1064,7 +1365,6 @@ export default function DevicesPage() {
             </motion.div>
           </AnimatePresence>
         </div>
-      </div>
 
       {/* ── Create LoRaWAN Device Modal ───────────────────────────────────── */}
       <CreateDeviceModal
@@ -1075,6 +1375,14 @@ export default function DevicesPage() {
         error={createDeviceOpen ? (ttnError ?? null) : null}
         onClose={() => { setCreateDeviceOpen(false); dispatch(clearError()); }}
         onSubmit={handleCreateDevice}
+      />
+
+      {/* ── Export Modal ──────────────────────────────────────────────────── */}
+      <ExportModal
+        open={exportModalOpen}
+        application={selectedApplication}
+        devices={ttnDevices}
+        onClose={() => setExportModalOpen(false)}
       />
 
       {/* ── Add / Edit Device Modal ───────────────────────────────────────── */}

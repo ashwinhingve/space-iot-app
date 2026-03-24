@@ -567,6 +567,8 @@ export const createDevice = async (req: Request, res: Response) => {
       description,
       devEui: devEui.toUpperCase(),
       joinEui: joinEui.toUpperCase(),
+      lorawanVersion: lorawanVersion || 'MAC_V1_0_3',
+      lorawanPhyVersion: phyVersion || 'PHY_V1_0_3_REV_A',
       isOnline: false,
       metrics: { totalUplinks: 0, totalDownlinks: 0 },
     });
@@ -1520,5 +1522,125 @@ export const getGatewayStats = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error fetching TTN gateway stats:', error);
     res.status(500).json({ error: 'Failed to fetch gateway stats' });
+  }
+};
+
+// ─── Frequency plan / band helpers ───────────────────────────────────────────
+
+const REGION_FREQUENCY_PLAN: Record<string, string> = {
+  eu1:  'EU_863_870_TTN',
+  nam1: 'US_902_928_FSB_2',
+  au1:  'AU_915_928_FSB_2',
+};
+
+const REGION_BAND_ID: Record<string, string> = {
+  eu1:  'EU_863_870',
+  nam1: 'US_902_928',
+  au1:  'AU_915_928',
+};
+
+/** Normalise lorawan_phy_version to the identifier used in the TTN CSV format */
+function normalisePhyVersion(raw: string | undefined): string {
+  if (!raw) return 'RP002_V1_0_3';
+  // Already in RP002 form
+  if (raw.startsWith('RP002')) return raw;
+  // Convert PHY_V1_0_X_REV_Y → keep as-is (TTN CSV accepts both)
+  return raw;
+}
+
+/**
+ * Export all devices for an application in TTN-compatible CSV or JSON format.
+ * GET /api/ttn/applications/:applicationId/devices/export?format=csv|json&ids=id1,id2,...
+ */
+export const exportDevices = async (req: Request, res: Response) => {
+  try {
+    const { applicationId } = req.params;
+    const format = (req.query.format as string) || 'csv';
+    const idsParam = req.query.ids as string | undefined;
+
+    const application = await TTNApplication.findOne({
+      applicationId,
+      owner: req.user._id,
+    });
+
+    if (!application) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+
+    const filter: Record<string, unknown> = { applicationId, owner: req.user._id };
+    if (idsParam) {
+      const ids = idsParam.split(',').map((s) => s.trim()).filter(Boolean);
+      if (ids.length > 0) filter.deviceId = { $in: ids };
+    }
+
+    const devices = await TTNDevice.find(filter).sort({ createdAt: 1 });
+
+    const frequencyPlanId = REGION_FREQUENCY_PLAN[application.ttnRegion] ?? 'EU_863_870_TTN';
+    const bandId = REGION_BAND_ID[application.ttnRegion] ?? 'EU_863_870';
+
+    if (format === 'json') {
+      // TTN-compatible JSON array
+      const jsonData = devices.map((d) => ({
+        id: d.deviceId,
+        dev_eui: d.devEui,
+        join_eui: d.joinEui ?? '',
+        name: d.name,
+        description: d.description ?? '',
+        frequency_plan_id: frequencyPlanId,
+        lorawan_version: d.lorawanVersion ?? 'MAC_V1_0_3',
+        lorawan_phy_version: normalisePhyVersion(d.lorawanPhyVersion),
+        app_key: '',          // never stored — fill in TTN console
+        brand_id: '',
+        model_id: '',
+        hardware_version: '',
+        firmware_version: '',
+        band_id: bandId,
+      }));
+
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="ttn-devices-${applicationId}-${Date.now()}.json"`
+      );
+      return res.json(jsonData);
+    }
+
+    // ── CSV ───────────────────────────────────────────────────────────────────
+    const HEADERS = [
+      'id', 'dev_eui', 'join_eui', 'name',
+      'frequency_plan_id', 'lorawan_version', 'lorawan_phy_version',
+      'app_key', 'brand_id', 'model_id',
+      'hardware_version', 'firmware_version', 'band_id',
+    ];
+
+    const escape = (v: string) => `"${(v ?? '').replace(/"/g, '""')}"`;
+
+    const rows = devices.map((d) => [
+      escape(d.deviceId),
+      escape(d.devEui),
+      escape(d.joinEui ?? ''),
+      escape(d.name),
+      escape(frequencyPlanId),
+      escape(d.lorawanVersion ?? 'MAC_V1_0_3'),
+      escape(normalisePhyVersion(d.lorawanPhyVersion)),
+      escape(''),  // app_key — never stored
+      escape(''),  // brand_id
+      escape(''),  // model_id
+      escape(''),  // hardware_version
+      escape(''),  // firmware_version
+      escape(bandId),
+    ].join(','));
+
+    const csv = [HEADERS.join(','), ...rows].join('\r\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="ttn-devices-${applicationId}-${Date.now()}.csv"`
+    );
+    return res.send(csv);
+  } catch (error) {
+    console.error('Error exporting TTN devices:', error);
+    res.status(500).json({ error: 'Failed to export devices' });
   }
 };

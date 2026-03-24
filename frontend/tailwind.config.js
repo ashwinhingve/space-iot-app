@@ -8,7 +8,25 @@ module.exports = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans:    ['Plus Jakarta Sans', 'sans-serif'],
+        body:    ['Plus Jakarta Sans', 'sans-serif'],
+        display: ['Rajdhani', 'sans-serif'],
+        data:    ['JetBrains Mono', 'monospace'],
+      },
       colors: {
+        iot: {
+          bg:        '#0b0f19',
+          card:      '#111827',
+          'card-2':  '#0d1117',
+          primary:   '#00e5ff',
+          secondary: '#7c3aed',
+          accent:    '#22c55e',
+          warn:      '#f59e0b',
+          danger:    '#ef4444',
+          border:    'rgba(0,229,255,0.12)',
+          muted:     '#4b5563',
+        },
         background: 'var(--background)',
         foreground: 'var(--foreground)',
         card: 'var(--card)',
@@ -56,6 +74,12 @@ module.exports = {
         'inner-glow': 'inset 0 0 20px rgba(99, 102, 241, 0.1)',
         'card': '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1)',
         'card-hover': '0 10px 40px -10px rgba(99, 102, 241, 0.2), 0 2px 8px -2px rgba(0, 0, 0, 0.05)',
+        'iot-cyan': '0 0 20px rgba(0,229,255,0.35)',
+        'iot-cyan-lg': '0 0 50px rgba(0,229,255,0.4), 0 0 100px rgba(0,229,255,0.15)',
+        'iot-purple': '0 0 30px rgba(124,58,237,0.4)',
+        'iot-green': '0 0 20px rgba(34,197,94,0.4)',
+        'iot-card': '0 4px 24px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)',
+        'iot-card-hover': '0 8px 40px rgba(0,0,0,0.6), 0 0 30px rgba(0,229,255,0.12), inset 0 1px 0 rgba(0,229,255,0.08)',
       },
       backdropBlur: {
         xs: '2px',

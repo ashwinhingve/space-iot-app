@@ -7,6 +7,13 @@ interface User {
   name: string;
   avatar?: string;
   authProvider: 'local' | 'google';
+  role: string;
+  permissions: string[];
+  isActive: boolean;
+  phone?: string;
+  department?: string;
+  village?: string;
+  project?: string;
   createdAt: string;
 }
 
@@ -82,6 +89,29 @@ export const login = createAsyncThunk(
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Network error';
       return rejectWithValue(errorMessage);
+    }
+  }
+);
+
+/**
+ * First-time Individual mode setup — sets system to single mode + registers as Admin.
+ * Falls back to regular register if admin already exists (returns 403).
+ */
+export const setupSystem = createAsyncThunk(
+  'auth/setup',
+  async (userData: { name: string; email: string; password: string }, { rejectWithValue }) => {
+    try {
+      const response = await fetch(API_ENDPOINTS.SETUP, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(userData),
+      });
+      const data = await response.json();
+      if (!response.ok) return rejectWithValue(data.message || 'Setup failed');
+      saveAuthData(data.token, data.user);
+      return data;
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Network error');
     }
   }
 );
@@ -235,6 +265,23 @@ const authSlice = createSlice({
       .addCase(login.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string || 'Login failed';
+        state.isAuthenticated = false;
+      })
+      // Setup (individual mode first-time)
+      .addCase(setupSystem.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(setupSystem.fulfilled, (state, action) => {
+        state.loading = false;
+        state.user = action.payload.user;
+        state.token = action.payload.token;
+        state.isAuthenticated = true;
+        state.error = null;
+      })
+      .addCase(setupSystem.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string || 'Setup failed';
         state.isAuthenticated = false;
       })
       // Register

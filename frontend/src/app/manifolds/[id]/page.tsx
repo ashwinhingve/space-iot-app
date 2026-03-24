@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation';
 import { useDispatch, useSelector } from 'react-redux';
 import { MainLayout } from '@/components/MainLayout';
-import AnimatedBackground from '@/components/AnimatedBackground';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -979,11 +978,8 @@ export default function ManifoldDetailPage() {
   if (loading || !selectedManifold) {
     return (
       <MainLayout>
-        <div className="relative min-h-screen">
-          <AnimatedBackground variant="subtle" showParticles showGradientOrbs />
-          <div className="relative z-10 flex h-screen items-center justify-center text-muted-foreground">
-            <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading manifold…
-          </div>
+        <div className="flex h-screen items-center justify-center text-muted-foreground">
+          <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading manifold…
         </div>
       </MainLayout>
     );
@@ -994,10 +990,7 @@ export default function ManifoldDetailPage() {
   // ════════════════════════════════════════════════════════════
   return (
     <MainLayout>
-      <div className="relative min-h-screen">
-        <AnimatedBackground variant="subtle" showParticles showGradientOrbs />
-
-        <div className="container relative z-10 space-y-5 px-4 py-6 md:py-8">
+      <div className="container space-y-5 px-4 py-6 md:py-8">
 
           {/* ── Header ─────────────────────────────────────── */}
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -3300,7 +3293,6 @@ export default function ManifoldDetailPage() {
               )}
             </div>
           )}
-        </div>
       </div>
     </MainLayout>
   );

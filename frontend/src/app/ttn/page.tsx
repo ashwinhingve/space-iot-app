@@ -6,7 +6,6 @@ import { useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { MainLayout } from '@/components/MainLayout';
-import AnimatedBackground from '@/components/AnimatedBackground';
 import { Button } from '@/components/ui/button';
 import { RootState, AppDispatch } from '@/store/store';
 import {
@@ -684,10 +683,7 @@ export default function TTNPage() {
         />
       </Suspense>
 
-      <div className="relative min-h-screen">
-        <AnimatedBackground variant="subtle" showParticles={true} showGradientOrbs={true} />
-
-        <div className="relative z-10 container mx-auto px-4 py-6 md:py-8 max-w-7xl">
+      <div className="container mx-auto px-4 py-6 md:py-8 max-w-7xl">
           {/* Header */}
           <motion.div
             initial={{ opacity: 0, y: -20 }}
@@ -1791,7 +1787,6 @@ export default function TTNPage() {
               </AnimatePresence>
             </>
           )}
-        </div>
 
         {/* Add Application Modal */}
         <AnimatePresence>

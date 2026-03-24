@@ -11,7 +11,10 @@ interface AuthGuardProps {
 }
 
 // Routes that require authentication
-const protectedRoutes = ['/dashboard', '/devices', '/manifolds', '/device', '/ttn', '/scada', '/oms', '/reports', '/sld', '/command-area-map'];
+const protectedRoutes = ['/dashboard', '/devices', '/manifolds', '/device', '/ttn', '/scada', '/oms', '/reports', '/sld', '/command-area-map', '/admin', '/tickets', '/documents'];
+
+// Routes that are only accessible to admins
+const adminOnlyRoutes = ['/admin'];
 
 // Routes that should redirect to dashboard if already authenticated
 const authRoutes = ['/login', '/register'];
@@ -22,14 +25,21 @@ const getStoredToken = (): string | null => {
   return localStorage.getItem('token');
 };
 
+const getStoredUser = (): { role?: string } | null => {
+  if (typeof window === 'undefined') return null;
+  const userStr = localStorage.getItem('user');
+  return userStr ? JSON.parse(userStr) : null;
+};
+
 export function AuthGuard({ children }: AuthGuardProps) {
   const router = useRouter();
   const pathname = usePathname();
   const dispatch = useDispatch<AppDispatch>();
-  const { isAuthenticated, token, loading } = useSelector((state: RootState) => state.auth);
+  const { isAuthenticated, token, loading, user } = useSelector((state: RootState) => state.auth);
   const [isInitialized, setIsInitialized] = useState(false);
 
   const isProtectedRoute = protectedRoutes.some(route => pathname?.startsWith(route));
+  const isAdminRoute = adminOnlyRoutes.some(route => pathname?.startsWith(route));
   const isAuthRoute = authRoutes.some(route => pathname?.startsWith(route));
 
   // Initialize auth state from localStorage on mount
@@ -52,6 +62,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
     if (!isInitialized) return;
 
     const storedToken = getStoredToken();
+    const storedUser = getStoredUser();
 
     // Redirect to login if trying to access protected route without auth
     if (isProtectedRoute && !storedToken && !loading) {
@@ -61,7 +72,11 @@ export function AuthGuard({ children }: AuthGuardProps) {
     else if (isAuthRoute && storedToken) {
       router.push('/dashboard');
     }
-  }, [isAuthenticated, isProtectedRoute, isAuthRoute, token, pathname, router, loading, isInitialized]);
+    // Redirect non-admins away from admin routes
+    else if (isAdminRoute && storedToken && storedUser && storedUser.role !== 'admin') {
+      router.push('/dashboard');
+    }
+  }, [isAuthenticated, isProtectedRoute, isAdminRoute, isAuthRoute, token, pathname, router, loading, isInitialized, user]);
 
   // Show nothing while initializing to prevent flash
   if (!isInitialized && isProtectedRoute) {

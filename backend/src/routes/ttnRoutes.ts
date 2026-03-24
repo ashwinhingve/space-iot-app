@@ -29,6 +29,7 @@ import {
   getGatewayStats,
   updateGateway,
   deleteGateway,
+  exportDevices,
 } from '../controllers/ttnController';
 
 const router = express.Router();
@@ -46,6 +47,9 @@ router.delete('/applications/:id', deleteApplication);
 
 // Device sync
 router.post('/applications/:applicationId/sync', syncDevices);
+
+// Device export (must come before /:deviceId routes)
+router.get('/applications/:applicationId/devices/export', exportDevices);
 
 // Device routes
 router.get('/applications/:applicationId/devices', getDevices);

@@ -11,6 +11,7 @@ import jwt from 'jsonwebtoken';
 
 // Import routes and models
 import authRoutes from './routes/authRoutes';
+import adminRoutes from './routes/adminRoutes';
 import deviceRoutes from './routes/deviceRoutes';
 import wifiRoutes from './routes/wifiRoutes';
 import manifoldRoutes from './routes/manifoldRoutes';
@@ -19,6 +20,10 @@ import componentRoutes from './routes/componentRoutes';
 import ttnRoutes from './routes/ttnRoutes';
 import ttnWebhookRoutes from './routes/ttnWebhookRoutes';
 import networkDeviceRoutes from './routes/networkDeviceRoutes';
+import ticketRoutes from './routes/ticketRoutes';
+import roleRoutes from './routes/roleRoutes';
+import teamRoutes from './routes/teamRoutes';
+import activityLogRoutes from './routes/activityLogRoutes';
 import { Device } from './models/Device';
 import { NetworkDevice } from './models/NetworkDevice';
 import { Manifold } from './models/Manifold';
@@ -32,6 +37,7 @@ import { ttnMqttService } from './services/ttnMqttService';
 import { TTNApplication } from './models/TTNApplication';
 import { TTNDevice } from './models/TTNDevice';
 import { ttnService } from './services/ttnService';
+import { seedDefaultRoles } from './controllers/roleController';
 
 // Load environment variables
 dotenv.config();
@@ -48,7 +54,7 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: config.frontendUrl || 'http://localhost:3000',
+    origin: config.frontendUrl || 'http://localhost:4000',
     methods: ['GET', 'POST']
   }
 });
@@ -69,15 +75,15 @@ const corsOptions = {
 
     // Development allowed origins
     const developmentOrigins = [
-      'http://localhost:3000',
-      'http://127.0.0.1:3000',
+      'http://localhost:4000',
+      'http://127.0.0.1:4000',
       config.frontendUrl
     ].filter(Boolean);
 
     const allowedOrigins = isProduction ? productionOrigins : [...productionOrigins, ...developmentOrigins];
 
     // Allow local network IPs in development only
-    if (!isProduction && origin.match(/^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}):3000$/)) {
+    if (!isProduction && origin.match(/^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}):4000$/)) {
       return callback(null, true);
     }
 
@@ -424,6 +430,37 @@ async function setupMqtt() {
     aedes = new Aedes();
     mqttServer = net.createServer(aedes.handle);
 
+    // Handle EADDRINUSE: if port is already in use, connect as client to existing broker
+    mqttServer.on('error', (err: any) => {
+      if (err.code === 'EADDRINUSE') {
+        console.warn(`[MQTT] Port ${config.mqttPort} already in use — connecting as client to existing broker`);
+        const topics = [
+          'devices/+/data', 'devices/+/online',
+          'manifolds/+/status', 'manifolds/+/online', 'manifolds/+/ack',
+          'gsm/+/data', 'gsm/+/online', 'gsm/+/location'
+        ];
+        setTimeout(() => {
+          const fallback = mqtt.connect(`mqtt://localhost:${config.mqttPort}`, {
+            reconnectPeriod: 2000,
+            connectTimeout: 5000,
+            clientId: `backend-fallback-${Date.now()}`
+          });
+          fallback.on('connect', () => {
+            console.log('[MQTT] Connected to existing broker');
+            fallback.subscribe(topics, { qos: 0 });
+          });
+          fallback.on('message', async (topic: string, message: Buffer) => {
+            try { await handleMqttMessage(topic, message); } catch {}
+          });
+          fallback.on('error', (e) => console.warn('[MQTT] Fallback client error:', e.message));
+          mqttClient = fallback;
+          app.set('mqttClient', fallback);
+        }, 500);
+      } else {
+        console.error('[MQTT] Server error:', err);
+      }
+    });
+
     mqttServer.listen(config.mqttPort, '0.0.0.0', () => {
       console.log(`MQTT Broker running on port ${config.mqttPort}`);
       console.log(`  - Local:   mqtt://localhost:${config.mqttPort}`);
@@ -604,7 +641,10 @@ io.on('connection', (socket) => {
 
 // Connect to MongoDB
 mongoose.connect(config.mongodbUri)
-  .then(() => console.log('Connected to MongoDB'))
+  .then(async () => {
+    console.log('Connected to MongoDB');
+    await seedDefaultRoles();
+  })
   .catch((err) => console.error('MongoDB connection error:', err));
 
 // ============================================================
@@ -678,6 +718,7 @@ if (!isProduction) {
 
 // Setup API routes
 app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/devices', deviceRoutes);
 app.use('/api/device', wifiRoutes);
 app.use('/api/manifolds', manifoldRoutes);
@@ -686,6 +727,10 @@ app.use('/api/components', componentRoutes);
 app.use('/api/ttn', ttnRoutes);
 app.use('/api/ttn/webhook', ttnWebhookRoutes);
 app.use('/api/network-devices', networkDeviceRoutes);
+app.use('/api/tickets', ticketRoutes);
+app.use('/api/roles', roleRoutes);
+app.use('/api/teams', teamRoutes);
+app.use('/api/activity-logs', activityLogRoutes);
 
 // ============================================================
 // ===== SERVER STARTUP =====

@@ -35,6 +35,9 @@ export interface ITTNDevice extends mongoose.Document {
     avgRssi?: number;
     avgSnr?: number;
   };
+  // LoRaWAN registration parameters (stored for export)
+  lorawanVersion?: string;
+  lorawanPhyVersion?: string;
   // Device attributes from TTN
   attributes?: Record<string, string>;
   // Payload formatter
@@ -116,6 +119,14 @@ const ttnDeviceSchema = new mongoose.Schema({
     totalDownlinks: { type: Number, default: 0 },
     avgRssi: Number,
     avgSnr: Number
+  },
+  lorawanVersion: {
+    type: String,
+    trim: true,
+  },
+  lorawanPhyVersion: {
+    type: String,
+    trim: true,
   },
   attributes: {
     type: Map,

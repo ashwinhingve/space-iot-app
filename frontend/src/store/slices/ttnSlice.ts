@@ -52,6 +52,8 @@ export interface TTNDevice {
     avgRssi?: number;
     avgSnr?: number;
   };
+  lorawanVersion?: string;
+  lorawanPhyVersion?: string;
   createdAt: string;
   updatedAt: string;
 }

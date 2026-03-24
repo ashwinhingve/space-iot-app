@@ -61,6 +61,15 @@ export const auth = async (req: Request, res: Response, next: NextFunction) => {
       });
     }
 
+    // Check if account is active
+    if (!user.isActive) {
+      return res.status(403).json({
+        error: 'Account disabled',
+        message: 'Your account has been disabled. Please contact the administrator.',
+        code: 'ACCOUNT_DISABLED'
+      });
+    }
+
     // Attach user and token to request
     req.user = user;
     req.token = token;
@@ -73,4 +82,4 @@ export const auth = async (req: Request, res: Response, next: NextFunction) => {
       code: 'AUTH_ERROR'
     });
   }
-}; 
+};

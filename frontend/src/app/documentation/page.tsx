@@ -2,7 +2,6 @@
 
 import React, { useState } from 'react';
 import { MainLayout } from '@/components/MainLayout';
-import AnimatedBackground from '@/components/AnimatedBackground';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Book,
@@ -489,10 +488,7 @@ export default function DocumentationPage() {
 
   return (
     <MainLayout>
-      <div className="relative min-h-screen">
-        <AnimatedBackground variant="subtle" showParticles={true} showGradientOrbs={true} />
-
-        <div className="relative z-10 container mx-auto py-6 md:py-8 px-4">
+      <div className="container mx-auto py-6 md:py-8 px-4">
           {/* Header */}
           <motion.div
             className="mb-10"
@@ -896,7 +892,6 @@ export default function DocumentationPage() {
               </motion.div>
             </motion.div>
           </div>
-        </div>
       </div>
     </MainLayout>
   );

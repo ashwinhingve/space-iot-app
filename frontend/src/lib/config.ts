@@ -14,6 +14,7 @@ export const API_ENDPOINTS = {
   GOOGLE_AUTH: `${API_BASE_URL}/api/auth/google`,
   ME: `${API_BASE_URL}/api/auth/me`,
   LOGOUT: `${API_BASE_URL}/api/auth/logout`,
+  SETUP: `${API_BASE_URL}/api/auth/setup`,   // First-time individual mode setup
 
   // Devices
   DEVICES: `${API_BASE_URL}/api/devices`,
@@ -79,6 +80,43 @@ export const API_ENDPOINTS = {
   TTN_STATS: (appId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/stats`,
   TTN_LOGS: (appId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/logs`,
   TTN_LOGS_EXPORT: (appId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/logs/export`,
+  TTN_DEVICES_EXPORT: (appId: string) => `${API_BASE_URL}/api/ttn/applications/${appId}/devices/export`,
+
+  // Tickets
+  TICKETS: `${API_BASE_URL}/api/tickets`,
+  TICKET_STATS: `${API_BASE_URL}/api/tickets/stats`,
+  TICKET_DETAIL: (id: string) => `${API_BASE_URL}/api/tickets/${id}`,
+  TICKET_ADVANCE: (id: string) => `${API_BASE_URL}/api/tickets/${id}/advance`,
+  TICKET_REJECT: (id: string) => `${API_BASE_URL}/api/tickets/${id}/reject`,
+  TICKET_REOPEN: (id: string) => `${API_BASE_URL}/api/tickets/${id}/reopen`,
+  TICKET_COMMENT: (id: string) => `${API_BASE_URL}/api/tickets/${id}/comments`,
+  TICKET_DOCUMENT: (id: string) => `${API_BASE_URL}/api/tickets/${id}/documents`,
+
+  // Roles
+  ROLES: `${API_BASE_URL}/api/roles`,
+  ROLE_DETAIL: (slug: string) => `${API_BASE_URL}/api/roles/${slug}`,
+
+  // Teams
+  TEAMS: `${API_BASE_URL}/api/teams`,
+  TEAM_DETAIL: (id: string) => `${API_BASE_URL}/api/teams/${id}`,
+  TEAM_MEMBERS: (id: string) => `${API_BASE_URL}/api/teams/${id}/members`,
+  TEAM_MEMBER: (id: string, userId: string) => `${API_BASE_URL}/api/teams/${id}/members/${userId}`,
+
+  // Activity Logs
+  ACTIVITY_LOGS: `${API_BASE_URL}/api/activity-logs`,
+
+  // System Config
+  SYSTEM_CONFIG: `${API_BASE_URL}/api/admin/config`,
+
+  // Admin (admin only)
+  ADMIN_USERS: `${API_BASE_URL}/api/admin/users`,
+  ADMIN_CREATE_USER: `${API_BASE_URL}/api/admin/users`,
+  ADMIN_USER_ROLE: (id: string) => `${API_BASE_URL}/api/admin/users/${id}/role`,
+  ADMIN_USER_PERMISSIONS: (id: string) => `${API_BASE_URL}/api/admin/users/${id}/permissions`,
+  ADMIN_USER_PROFILE: (id: string) => `${API_BASE_URL}/api/admin/users/${id}/profile`,
+  ADMIN_USER_ACTIVE: (id: string) => `${API_BASE_URL}/api/admin/users/${id}/active`,
+  ADMIN_DELETE_USER: (id: string) => `${API_BASE_URL}/api/admin/users/${id}`,
+  ADMIN_STATS: `${API_BASE_URL}/api/admin/stats`,
 };
 
 // Socket.io Configuration
