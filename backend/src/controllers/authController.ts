@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import { User, ADMIN_EMAIL_CONST } from '../models/User';
+import { User, ADMIN_EMAIL_CONST, UserRole } from '../models/User';
 import bcrypt from 'bcryptjs';
 import { OAuth2Client } from 'google-auth-library';
 import { SystemConfig, getSystemMode, invalidateSystemModeCache } from '../models/SystemConfig';
@@ -30,6 +30,34 @@ const generateToken = (userId: string): string => {
 import { ROLE_DEFAULT_PERMISSIONS } from '../models/User';
 
 const ADMIN_PERMISSIONS: string[] = ROLE_DEFAULT_PERMISSIONS['admin'];
+
+/**
+ * Ensure legacy users always have required auth fields.
+ * Some older documents may miss role/permissions/isActive.
+ */
+async function ensureUserDefaults(user: any): Promise<void> {
+  let changed = false;
+
+  if (user.isActive === undefined) {
+    user.isActive = true;
+    changed = true;
+  }
+
+  if (!user.role) {
+    user.role = user.email === ADMIN_EMAIL_CONST ? 'admin' : 'ows';
+    changed = true;
+  }
+
+  if (!Array.isArray(user.permissions) || user.permissions.length === 0) {
+    const role = user.role as UserRole;
+    user.permissions = ROLE_DEFAULT_PERMISSIONS[role] || ['dashboard'];
+    changed = true;
+  }
+
+  if (changed) {
+    await user.save();
+  }
+}
 
 /**
  * Enforce admin email always has role=admin and full permissions.
@@ -211,12 +239,14 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
-    if (!user.isActive) {
+    if (user.isActive === false) {
       return res.status(403).json({
         error: 'Account disabled',
         message: 'Your account has been disabled. Please contact the administrator.'
       });
     }
+
+    await ensureUserDefaults(user);
 
     const isMatch = await user.comparePassword(password);
 
@@ -262,6 +292,7 @@ export const getMe = async (req: Request, res: Response) => {
       });
     }
 
+    await ensureUserDefaults(user);
     await enforceAdminIfNeeded(user);
 
     res.json({
@@ -361,12 +392,13 @@ export const googleAuth = async (req: Request, res: Response) => {
         console.log(`New user registered via Google: ${user.email} (role: ${user.role})`);
       }
     } else {
-      if (!user.isActive) {
+      if (user.isActive === false) {
         return res.status(403).json({
           error: 'Account disabled',
           message: 'Your account has been disabled. Please contact the administrator.'
         });
       }
+      await ensureUserDefaults(user);
       user.name = name;
       user.avatar = avatar || user.avatar;
       await user.save();

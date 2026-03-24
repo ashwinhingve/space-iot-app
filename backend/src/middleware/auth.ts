@@ -62,7 +62,7 @@ export const auth = async (req: Request, res: Response, next: NextFunction) => {
     }
 
     // Check if account is active
-    if (!user.isActive) {
+    if (user.isActive === false) {
       return res.status(403).json({
         error: 'Account disabled',
         message: 'Your account has been disabled. Please contact the administrator.',

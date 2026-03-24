@@ -15,7 +15,7 @@ export const authorize = (...roles: UserRole[]) => {
       });
     }
 
-    if (!req.user.isActive) {
+    if (req.user.isActive === false) {
       return res.status(403).json({
         error: 'Account disabled',
         message: 'Your account has been disabled. Please contact the administrator.',
@@ -49,7 +49,7 @@ export const requireActive = (req: Request, res: Response, next: NextFunction) =
     });
   }
 
-  if (!req.user.isActive) {
+  if (req.user.isActive === false) {
     return res.status(403).json({
       error: 'Account disabled',
       message: 'Your account has been disabled. Please contact the administrator.',

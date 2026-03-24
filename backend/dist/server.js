@@ -57,6 +57,7 @@ const aedes_1 = __importDefault(require("aedes"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 // Import routes and models
 const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
+const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
 const deviceRoutes_1 = __importDefault(require("./routes/deviceRoutes"));
 const wifiRoutes_1 = __importDefault(require("./routes/wifiRoutes"));
 const manifoldRoutes_1 = __importDefault(require("./routes/manifoldRoutes"));
@@ -65,6 +66,10 @@ const componentRoutes_1 = __importDefault(require("./routes/componentRoutes"));
 const ttnRoutes_1 = __importDefault(require("./routes/ttnRoutes"));
 const ttnWebhookRoutes_1 = __importDefault(require("./routes/ttnWebhookRoutes"));
 const networkDeviceRoutes_1 = __importDefault(require("./routes/networkDeviceRoutes"));
+const ticketRoutes_1 = __importDefault(require("./routes/ticketRoutes"));
+const roleRoutes_1 = __importDefault(require("./routes/roleRoutes"));
+const teamRoutes_1 = __importDefault(require("./routes/teamRoutes"));
+const activityLogRoutes_1 = __importDefault(require("./routes/activityLogRoutes"));
 const Device_1 = require("./models/Device");
 const NetworkDevice_1 = require("./models/NetworkDevice");
 const Manifold_1 = require("./models/Manifold");
@@ -77,6 +82,7 @@ const ttnMqttService_1 = require("./services/ttnMqttService");
 const TTNApplication_1 = require("./models/TTNApplication");
 const TTNDevice_1 = require("./models/TTNDevice");
 const ttnService_1 = require("./services/ttnService");
+const roleController_1 = require("./controllers/roleController");
 // Load environment variables
 dotenv_1.default.config();
 // Validate environment variables before proceeding
@@ -88,7 +94,7 @@ const app = (0, express_1.default)();
 const httpServer = (0, http_1.createServer)(app);
 const io = new socket_io_1.Server(httpServer, {
     cors: {
-        origin: config.frontendUrl || 'http://localhost:3000',
+        origin: config.frontendUrl || 'http://localhost:4000',
         methods: ['GET', 'POST']
     }
 });
@@ -107,13 +113,13 @@ const corsOptions = {
         ].filter(Boolean);
         // Development allowed origins
         const developmentOrigins = [
-            'http://localhost:3000',
-            'http://127.0.0.1:3000',
+            'http://localhost:4000',
+            'http://127.0.0.1:4000',
             config.frontendUrl
         ].filter(Boolean);
         const allowedOrigins = isProduction ? productionOrigins : [...productionOrigins, ...developmentOrigins];
         // Allow local network IPs in development only
-        if (!isProduction && origin.match(/^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}):3000$/)) {
+        if (!isProduction && origin.match(/^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}):4000$/)) {
             return callback(null, true);
         }
         if (allowedOrigins.includes(origin)) {
@@ -402,6 +408,40 @@ function setupMqtt() {
             // Local Aedes broker (default for development)
             aedes = new aedes_1.default();
             mqttServer = net.createServer(aedes.handle);
+            // Handle EADDRINUSE: if port is already in use, connect as client to existing broker
+            mqttServer.on('error', (err) => {
+                if (err.code === 'EADDRINUSE') {
+                    console.warn(`[MQTT] Port ${config.mqttPort} already in use — connecting as client to existing broker`);
+                    const topics = [
+                        'devices/+/data', 'devices/+/online',
+                        'manifolds/+/status', 'manifolds/+/online', 'manifolds/+/ack',
+                        'gsm/+/data', 'gsm/+/online', 'gsm/+/location'
+                    ];
+                    setTimeout(() => {
+                        const fallback = mqtt_1.default.connect(`mqtt://localhost:${config.mqttPort}`, {
+                            reconnectPeriod: 2000,
+                            connectTimeout: 5000,
+                            clientId: `backend-fallback-${Date.now()}`
+                        });
+                        fallback.on('connect', () => {
+                            console.log('[MQTT] Connected to existing broker');
+                            fallback.subscribe(topics, { qos: 0 });
+                        });
+                        fallback.on('message', (topic, message) => __awaiter(this, void 0, void 0, function* () {
+                            try {
+                                yield handleMqttMessage(topic, message);
+                            }
+                            catch (_a) { }
+                        }));
+                        fallback.on('error', (e) => console.warn('[MQTT] Fallback client error:', e.message));
+                        mqttClient = fallback;
+                        app.set('mqttClient', fallback);
+                    }, 500);
+                }
+                else {
+                    console.error('[MQTT] Server error:', err);
+                }
+            });
             mqttServer.listen(config.mqttPort, '0.0.0.0', () => {
                 console.log(`MQTT Broker running on port ${config.mqttPort}`);
                 console.log(`  - Local:   mqtt://localhost:${config.mqttPort}`);
@@ -557,7 +597,10 @@ io.on('connection', (socket) => {
 });
 // Connect to MongoDB
 mongoose_1.default.connect(config.mongodbUri)
-    .then(() => console.log('Connected to MongoDB'))
+    .then(() => __awaiter(void 0, void 0, void 0, function* () {
+    console.log('Connected to MongoDB');
+    yield (0, roleController_1.seedDefaultRoles)();
+}))
     .catch((err) => console.error('MongoDB connection error:', err));
 // ============================================================
 // ===== HEALTH CHECK ENDPOINT =====
@@ -630,6 +673,7 @@ else {
 }
 // Setup API routes
 app.use('/api/auth', authRoutes_1.default);
+app.use('/api/admin', adminRoutes_1.default);
 app.use('/api/devices', deviceRoutes_1.default);
 app.use('/api/device', wifiRoutes_1.default);
 app.use('/api/manifolds', manifoldRoutes_1.default);
@@ -638,6 +682,10 @@ app.use('/api/components', componentRoutes_1.default);
 app.use('/api/ttn', ttnRoutes_1.default);
 app.use('/api/ttn/webhook', ttnWebhookRoutes_1.default);
 app.use('/api/network-devices', networkDeviceRoutes_1.default);
+app.use('/api/tickets', ticketRoutes_1.default);
+app.use('/api/roles', roleRoutes_1.default);
+app.use('/api/teams', teamRoutes_1.default);
+app.use('/api/activity-logs', activityLogRoutes_1.default);
 // ============================================================
 // ===== SERVER STARTUP =====
 // ============================================================

@@ -12,6 +12,7 @@ const router = express_1.default.Router();
 router.post('/register', rateLimiter_1.authLimiter, authController_1.register);
 router.post('/login', rateLimiter_1.authLimiter, authController_1.login);
 router.post('/google', rateLimiter_1.authLimiter, authController_1.googleAuth);
+router.post('/setup', rateLimiter_1.authLimiter, authController_1.setupSystem); // First-time individual mode setup
 // Protected routes (require authentication)
 router.get('/me', auth_1.auth, authController_1.getMe);
 router.post('/logout', auth_1.auth, authController_1.logout);

@@ -1,14 +1,17 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import { useSelector } from 'react-redux';
+import { useRouter } from 'next/navigation';
+import { useSelector, useDispatch } from 'react-redux';
 import {
   Bell, Search, ChevronRight,
   LayoutDashboard, Radio, Activity, Map, BarChart3,
-  Ticket, FileText, ShieldAlert,
+  Ticket, FileText, ShieldAlert, LogOut,
 } from 'lucide-react';
 import Link from 'next/link';
 import { RootState } from '@/store/store';
+import { AppDispatch } from '@/store/store';
+import { logout } from '@/store/slices/authSlice';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
 // ─── Route meta ───────────────────────────────────────────────────────────────
@@ -35,6 +38,8 @@ function getRouteMeta(pathname: string | null) {
 
 export function AppTopBar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const dispatch = useDispatch<AppDispatch>();
   const { user } = useSelector((s: RootState) => s.auth);
   const meta = getRouteMeta(pathname);
 
@@ -43,6 +48,11 @@ export function AppTopBar() {
         ? user.name.split(' ').slice(0, 2).map((n: string) => n[0]).join('').toUpperCase()
         : user.email?.[0]?.toUpperCase() ?? '?')
     : '?';
+
+  const handleLogout = () => {
+    dispatch(logout());
+    router.push('/login');
+  };
 
   return (
     <header className="h-14 border-b border-border/40 bg-card/60 backdrop-blur-sm flex items-center px-4 sm:px-6 gap-3 shrink-0 z-20">
@@ -94,6 +104,17 @@ export function AppTopBar() {
         <div className="hidden lg:block">
           <ThemeToggle />
         </div>
+
+        {/* Explicit sign-out in top bar for quick access */}
+        {user && (
+          <button
+            onClick={handleLogout}
+            className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border/50 text-xs text-muted-foreground hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10 transition-all duration-150"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            Sign out
+          </button>
+        )}
 
         {/* User avatar (mobile) */}
         {user && (

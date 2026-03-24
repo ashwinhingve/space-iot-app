@@ -58,6 +58,14 @@ const auth = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () 
                 code: 'USER_NOT_FOUND'
             });
         }
+        // Check if account is active
+        if (user.isActive === false) {
+            return res.status(403).json({
+                error: 'Account disabled',
+                message: 'Your account has been disabled. Please contact the administrator.',
+                code: 'ACCOUNT_DISABLED'
+            });
+        }
         // Attach user and token to request
         req.user = user;
         req.token = token;
