@@ -1,6 +1,6 @@
 # IoT Space
 
-A real-time IoT device monitoring and control platform built with Next.js, Node.js, and MQTT. .
+A real-time IoT device monitoring and control platform built with Next.js, Node.js, and MQTT. 
 
 ## Features
 
