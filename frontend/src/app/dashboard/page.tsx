@@ -194,6 +194,7 @@ export default function DashboardPage() {
 
   const [ticketStats, setTicketStats] = useState<TicketStats | null>(null);
   const [recentTickets, setRecentTickets] = useState<TicketSummary[]>([]);
+  const [ticketError, setTicketError] = useState<string | null>(null);
   const [loadingTickets, setLoadingTickets] = useState(false);
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState(new Date());
@@ -222,7 +223,9 @@ export default function DashboardPage() {
           const data = await listRes.json();
           setRecentTickets(Array.isArray(data) ? data.slice(0, 5) : (data.tickets ?? []).slice(0, 5));
         }
-      } catch { /* silent */ }
+      } catch {
+        setTicketError('Failed to load ticket data');
+      }
       setLoadingTickets(false);
     }
 
@@ -472,7 +475,12 @@ export default function DashboardPage() {
                     </Link>
                   </div>
 
-                  {loadingTickets ? (
+                  {ticketError ? (
+                    <div className="flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-xs text-red-400">
+                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                      <span>{ticketError}</span>
+                    </div>
+                  ) : loadingTickets ? (
                     <div className="space-y-3">
                       {[0, 1, 2].map(i => <Skeleton key={i} className="h-14 w-full" />)}
                     </div>

@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 
 export type UserRole =
+  | 'super_admin'
   | 'admin'
   | 'ews'
   | 'ows'
@@ -15,6 +16,22 @@ export type UserRole =
   // Legacy aliases kept for backward compat with existing DB documents
   | 'engineer' | 'operator';
 
+export type UserType = 'individual' | 'team';
+
+export type PurposeType =
+  | 'water_management'
+  | 'agriculture'
+  | 'industrial_iot'
+  | 'smart_city'
+  | 'research'
+  | 'other';
+
+export const SUBPAGE_DEFINITIONS: Record<string, string[]> = {
+  admin:   ['admin.users', 'admin.roles', 'admin.teams', 'admin.system', 'admin.infrastructure', 'admin.activity'],
+  reports: ['reports.pump', 'reports.electrical', 'reports.oms', 'reports.rssi'],
+  devices: ['devices.lorawan', 'devices.wifi', 'devices.gsm', 'devices.bluetooth'],
+};
+
 export type PagePermission =
   | 'dashboard'
   | 'devices'
@@ -24,32 +41,35 @@ export type PagePermission =
   | 'tickets'
   | 'documents'
   | 'billing_view'
-  | 'admin';
+  | 'admin'
+  | 'super_admin'
+  | 'console';
 
 export const ALL_PAGES: PagePermission[] = [
   'dashboard', 'devices', 'scada', 'oms', 'reports',
-  'tickets', 'documents', 'billing_view', 'admin'
+  'tickets', 'documents', 'billing_view', 'admin', 'super_admin', 'console'
 ];
 
 export const ROLE_DEFAULT_PERMISSIONS: Record<UserRole, PagePermission[]> = {
-  admin:                 ['dashboard', 'devices', 'scada', 'oms', 'reports', 'tickets', 'documents', 'billing_view', 'admin'],
-  ews:                   ['dashboard', 'devices', 'scada'],
-  ows:                   ['dashboard', 'devices', 'scada', 'oms'],
+  super_admin:           ['dashboard', 'devices', 'scada', 'oms', 'reports', 'tickets', 'documents', 'billing_view', 'admin', 'super_admin', 'console'],
+  admin:                 ['dashboard', 'devices', 'scada', 'oms', 'reports', 'tickets', 'documents', 'billing_view', 'admin', 'console'],
+  ews:                   ['dashboard', 'devices', 'scada', 'console'],
+  ows:                   ['dashboard', 'devices', 'scada', 'oms', 'console'],
   wua:                   ['dashboard', 'oms', 'reports'],
   survey:                ['dashboard', 'tickets'],
   executive_mechanic:    ['dashboard', 'tickets'],
   executive_electrical:  ['dashboard', 'tickets'],
   executive_civil:       ['dashboard', 'tickets'],
-  supervisor:            ['dashboard', 'devices', 'scada', 'oms', 'tickets'],
+  supervisor:            ['dashboard', 'devices', 'scada', 'oms', 'tickets', 'console'],
   quality_assurance:     ['dashboard', 'tickets', 'oms', 'reports'],
   // Legacy aliases
-  engineer:              ['dashboard', 'devices', 'scada', 'oms', 'reports'],
+  engineer:              ['dashboard', 'devices', 'scada', 'oms', 'reports', 'console'],
   operator:              ['dashboard', 'reports'],
 };
 
 // Full enum for Mongoose schema validation (includes legacy aliases)
 const SCHEMA_ROLES: string[] = [
-  'admin', 'ews', 'ows', 'wua', 'survey',
+  'super_admin', 'admin', 'ews', 'ows', 'wua', 'survey',
   'executive_mechanic', 'executive_electrical', 'executive_civil',
   'supervisor', 'quality_assurance',
   // legacy aliases (kept for backward compat with existing DB docs)
@@ -64,6 +84,7 @@ export const ALL_ROLES: UserRole[] = [
 ];
 
 export const ROLE_LABELS: Record<UserRole, string> = {
+  super_admin:           'Super Admin',
   admin:                 'Admin',
   ews:                   'EWS',
   ows:                   'OWS',
@@ -95,6 +116,10 @@ export interface IUser extends mongoose.Document {
   department?: string;
   village?: string;
   project?: string;
+  userType?: UserType;
+  purposeType?: PurposeType;
+  purposeDescription?: string;
+  subpagePermissions: string[];
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
@@ -116,7 +141,7 @@ const userSchema = new mongoose.Schema({
     required: function (this: IUser) {
       return this.authProvider === 'local';
     },
-    minlength: 6
+    minlength: 8
   },
   name: {
     type: String,
@@ -139,7 +164,7 @@ const userSchema = new mongoose.Schema({
   role: {
     type: String,
     enum: SCHEMA_ROLES,
-    default: 'ows'
+    default: 'admin'
   },
   permissions: {
     type: [String],
@@ -171,16 +196,34 @@ const userSchema = new mongoose.Schema({
   project: {
     type: String,
     trim: true
+  },
+  userType: {
+    type: String,
+    enum: ['individual', 'team'],
+    // No default — deliberately undefined for new Google users so onboarding can detect them
+  },
+  purposeType: {
+    type: String,
+    enum: ['water_management', 'agriculture', 'industrial_iot', 'smart_city', 'research', 'other']
+  },
+  purposeDescription: {
+    type: String,
+    trim: true,
+    maxlength: 500
+  },
+  subpagePermissions: {
+    type: [String],
+    default: []
   }
 }, {
   timestamps: true
 });
 
-// Auto-assign admin role + permissions for the admin email
+// Auto-assign super_admin role + permissions for the designated super admin email
 userSchema.pre('save', async function (next) {
   if (this.isModified('email') || this.isNew) {
     if (this.email === ADMIN_EMAIL) {
-      this.role = 'admin';
+      this.role = 'super_admin';
     }
   }
 
@@ -189,8 +232,10 @@ userSchema.pre('save', async function (next) {
     this.permissions = ROLE_DEFAULT_PERMISSIONS[this.role as UserRole] || ['dashboard'];
   }
 
-  // Hash password before saving (only for local auth)
+  // Hash password before saving (only for local auth, and only if not already hashed)
   if (!this.isModified('password') || !this.password) return next();
+  // Guard against accidental double-hashing (bcrypt hashes always start with $2)
+  if (this.password.startsWith('$2')) return next();
 
   try {
     const salt = await bcrypt.genSalt(10);
@@ -210,6 +255,7 @@ userSchema.methods.toJSON = function () {
   const obj = this.toObject();
   delete obj.password;
   delete obj.__v;
+  delete obj.googleId; // OAuth identity should not be exposed to frontend
   return obj;
 };
 

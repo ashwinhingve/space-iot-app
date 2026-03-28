@@ -12,31 +12,37 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.User = exports.ADMIN_EMAIL_CONST = exports.ROLE_LABELS = exports.ALL_ROLES = exports.ROLE_DEFAULT_PERMISSIONS = exports.ALL_PAGES = void 0;
+exports.User = exports.ADMIN_EMAIL_CONST = exports.ROLE_LABELS = exports.ALL_ROLES = exports.ROLE_DEFAULT_PERMISSIONS = exports.ALL_PAGES = exports.SUBPAGE_DEFINITIONS = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
+exports.SUBPAGE_DEFINITIONS = {
+    admin: ['admin.users', 'admin.roles', 'admin.teams', 'admin.system', 'admin.infrastructure', 'admin.activity'],
+    reports: ['reports.pump', 'reports.electrical', 'reports.oms', 'reports.rssi'],
+    devices: ['devices.lorawan', 'devices.wifi', 'devices.gsm', 'devices.bluetooth'],
+};
 exports.ALL_PAGES = [
     'dashboard', 'devices', 'scada', 'oms', 'reports',
-    'tickets', 'documents', 'billing_view', 'admin'
+    'tickets', 'documents', 'billing_view', 'admin', 'super_admin', 'console'
 ];
 exports.ROLE_DEFAULT_PERMISSIONS = {
-    admin: ['dashboard', 'devices', 'scada', 'oms', 'reports', 'tickets', 'documents', 'billing_view', 'admin'],
-    ews: ['dashboard', 'devices', 'scada'],
-    ows: ['dashboard', 'devices', 'scada', 'oms'],
+    super_admin: ['dashboard', 'devices', 'scada', 'oms', 'reports', 'tickets', 'documents', 'billing_view', 'admin', 'super_admin', 'console'],
+    admin: ['dashboard', 'devices', 'scada', 'oms', 'reports', 'tickets', 'documents', 'billing_view', 'admin', 'console'],
+    ews: ['dashboard', 'devices', 'scada', 'console'],
+    ows: ['dashboard', 'devices', 'scada', 'oms', 'console'],
     wua: ['dashboard', 'oms', 'reports'],
     survey: ['dashboard', 'tickets'],
     executive_mechanic: ['dashboard', 'tickets'],
     executive_electrical: ['dashboard', 'tickets'],
     executive_civil: ['dashboard', 'tickets'],
-    supervisor: ['dashboard', 'devices', 'scada', 'oms', 'tickets'],
+    supervisor: ['dashboard', 'devices', 'scada', 'oms', 'tickets', 'console'],
     quality_assurance: ['dashboard', 'tickets', 'oms', 'reports'],
     // Legacy aliases
-    engineer: ['dashboard', 'devices', 'scada', 'oms', 'reports'],
+    engineer: ['dashboard', 'devices', 'scada', 'oms', 'reports', 'console'],
     operator: ['dashboard', 'reports'],
 };
 // Full enum for Mongoose schema validation (includes legacy aliases)
 const SCHEMA_ROLES = [
-    'admin', 'ews', 'ows', 'wua', 'survey',
+    'super_admin', 'admin', 'ews', 'ows', 'wua', 'survey',
     'executive_mechanic', 'executive_electrical', 'executive_civil',
     'supervisor', 'quality_assurance',
     // legacy aliases (kept for backward compat with existing DB docs)
@@ -49,6 +55,7 @@ exports.ALL_ROLES = [
     'supervisor', 'quality_assurance',
 ];
 exports.ROLE_LABELS = {
+    super_admin: 'Super Admin',
     admin: 'Admin',
     ews: 'EWS',
     ows: 'OWS',
@@ -77,7 +84,7 @@ const userSchema = new mongoose_1.default.Schema({
         required: function () {
             return this.authProvider === 'local';
         },
-        minlength: 6
+        minlength: 8
     },
     name: {
         type: String,
@@ -100,7 +107,7 @@ const userSchema = new mongoose_1.default.Schema({
     role: {
         type: String,
         enum: SCHEMA_ROLES,
-        default: 'ows'
+        default: 'admin'
     },
     permissions: {
         type: [String],
@@ -132,24 +139,45 @@ const userSchema = new mongoose_1.default.Schema({
     project: {
         type: String,
         trim: true
+    },
+    userType: {
+        type: String,
+        enum: ['individual', 'team'],
+        // No default — deliberately undefined for new Google users so onboarding can detect them
+    },
+    purposeType: {
+        type: String,
+        enum: ['water_management', 'agriculture', 'industrial_iot', 'smart_city', 'research', 'other']
+    },
+    purposeDescription: {
+        type: String,
+        trim: true,
+        maxlength: 500
+    },
+    subpagePermissions: {
+        type: [String],
+        default: []
     }
 }, {
     timestamps: true
 });
-// Auto-assign admin role + permissions for the admin email
+// Auto-assign super_admin role + permissions for the designated super admin email
 userSchema.pre('save', function (next) {
     return __awaiter(this, void 0, void 0, function* () {
         if (this.isModified('email') || this.isNew) {
             if (this.email === ADMIN_EMAIL) {
-                this.role = 'admin';
+                this.role = 'super_admin';
             }
         }
         // Set default permissions for new users if not explicitly provided
         if (this.isNew && (!this.permissions || this.permissions.length === 0)) {
             this.permissions = exports.ROLE_DEFAULT_PERMISSIONS[this.role] || ['dashboard'];
         }
-        // Hash password before saving (only for local auth)
+        // Hash password before saving (only for local auth, and only if not already hashed)
         if (!this.isModified('password') || !this.password)
+            return next();
+        // Guard against accidental double-hashing (bcrypt hashes always start with $2)
+        if (this.password.startsWith('$2'))
             return next();
         try {
             const salt = yield bcryptjs_1.default.genSalt(10);
@@ -172,6 +200,7 @@ userSchema.methods.toJSON = function () {
     const obj = this.toObject();
     delete obj.password;
     delete obj.__v;
+    delete obj.googleId; // OAuth identity should not be exposed to frontend
     return obj;
 };
 exports.ADMIN_EMAIL_CONST = ADMIN_EMAIL;

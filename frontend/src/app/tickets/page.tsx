@@ -34,17 +34,13 @@ interface CreateForm {
   minar: string;
   projectName: string;
   oms: string;
-  kasra: string;
-  contactName: string;
-  contactMobile: string;
   deadline: string;
   assignedTo: string;
 }
 
 const EMPTY_FORM: CreateForm = {
   title: '', description: '', priority: 'normal', category: 'other',
-  village: '', minar: '', projectName: '', oms: '', kasra: '',
-  contactName: '', contactMobile: '', deadline: '', assignedTo: '',
+  village: '', minar: '', projectName: '', oms: '', deadline: '', assignedTo: '',
 };
 
 const CATEGORIES: { value: TicketCategory; label: string }[] = [
@@ -162,7 +158,7 @@ function CreateTicketModal({ onClose, onCreated, token }: {
             </div>
             <div>
               <h2 className="text-base font-semibold">Create Ticket</h2>
-              <p className="text-xs text-muted-foreground">Step {step} of 2 — {step === 1 ? 'Details' : 'Location & Contact'}</p>
+              <p className="text-xs text-muted-foreground">Step {step} of 2 — {step === 1 ? 'Details' : 'Location'}</p>
             </div>
           </div>
           <button onClick={onClose} className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary/50 transition-colors">
@@ -224,12 +220,10 @@ function CreateTicketModal({ onClose, onCreated, token }: {
             <>
               <div className="grid grid-cols-2 gap-3">
                 {[
-                  { key: 'village', label: 'Village', placeholder: 'Village name' },
-                  { key: 'minar', label: 'Minar', placeholder: 'Minar ID' },
-                  { key: 'projectName', label: 'Project', placeholder: 'Project name' },
-                  { key: 'oms', label: 'OMS', placeholder: 'OMS reference' },
-                  { key: 'kasra', label: 'Kasra', placeholder: 'Kasra code' },
-                  { key: 'contactName', label: 'Contact Name', placeholder: 'Contact person' },
+                  { key: 'village',     label: 'Village',  placeholder: 'Village name' },
+                  { key: 'minar',       label: 'Minar',    placeholder: 'Minar ID' },
+                  { key: 'projectName', label: 'Project',  placeholder: 'Project name' },
+                  { key: 'oms',         label: 'OMS',      placeholder: 'OMS reference' },
                 ].map(({ key, label, placeholder }) => (
                   <div key={key}>
                     <label className="block text-xs font-medium text-muted-foreground mb-1.5">{label}</label>
@@ -238,12 +232,6 @@ function CreateTicketModal({ onClose, onCreated, token }: {
                       className="w-full h-9 rounded-lg border border-border/50 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30" />
                   </div>
                 ))}
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Contact Mobile</label>
-                <input value={form.contactMobile} onChange={e => set('contactMobile', e.target.value)}
-                  placeholder="+92 300 0000000" type="tel"
-                  className="w-full h-9 rounded-lg border border-border/50 bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30" />
               </div>
             </>
           )}
@@ -397,11 +385,11 @@ function TicketRow({ ticket, onClick }: { ticket: TicketSummary; onClick: () => 
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-type TabId = 'all' | WorkflowStage;
+type TabId = 'all' | 'mine' | WorkflowStage;
 
 export default function TicketsPage() {
   const router = useRouter();
-  const { role, hasPermission, isAdmin, canWrite } = useRole();
+  const { role, hasPermission, isAdminRole, isSuperAdmin, canWrite } = useRole();
   const token = useSelector((s: RootState) => s.auth.token);
 
   const [tickets, setTickets] = useState<TicketSummary[]>([]);
@@ -423,11 +411,12 @@ export default function TicketsPage() {
     setTimeout(() => setToast(null), 3500);
   }, []);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (mine = false) => {
     setLoading(true);
     try {
+      const mineParam = mine ? '&mine=true' : '';
       const [ticketsRes, statsRes] = await Promise.all([
-        fetch(`${API_ENDPOINTS.TICKETS}?limit=200`, { headers: authHeaders }),
+        fetch(`${API_ENDPOINTS.TICKETS}?limit=200${mineParam}`, { headers: authHeaders }),
         fetch(API_ENDPOINTS.TICKET_STATS, { headers: authHeaders }),
       ]);
       if (ticketsRes.ok) { const d = await ticketsRes.json(); setTickets(d.tickets ?? []); }
@@ -439,11 +428,11 @@ export default function TicketsPage() {
     }
   }, [authHeaders, showToast]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { fetchData(activeTab === 'mine'); }, [fetchData, activeTab]);
 
   const filtered = useMemo(() => {
     return tickets.filter(t => {
-      if (activeTab !== 'all' && t.stage !== activeTab) return false;
+      if (activeTab !== 'all' && activeTab !== 'mine' && t.stage !== activeTab) return false;
       if (search) {
         const q = search.toLowerCase();
         return (
@@ -458,14 +447,15 @@ export default function TicketsPage() {
   }, [tickets, activeTab, search]);
 
   const tabs: { id: TabId; label: string; count: number }[] = [
-    { id: 'all', label: 'All', count: tickets.length },
+    { id: 'all',  label: 'All',      count: tickets.length },
+    { id: 'mine', label: 'My Tasks', count: activeTab === 'mine' ? tickets.length : 0 },
     ...(['draft', 'manager', 'executive', 'supervisor', 'billing', 'final_review'] as WorkflowStage[]).map(s => ({
       id: s as TabId,
       label: STAGE_CONFIG[s].label,
       count: stats?.byStage[s] ?? 0,
     })),
     { id: 'completed' as TabId, label: 'Completed', count: stats?.byStage['completed'] ?? 0 },
-    { id: 'rejected' as TabId, label: 'Rejected', count: stats?.byStage['rejected'] ?? 0 },
+    { id: 'rejected' as TabId, label: 'Rejected',   count: stats?.byStage['rejected'] ?? 0 },
   ];
 
   if (!hasPermission('tickets')) {
@@ -496,11 +486,11 @@ export default function TicketsPage() {
             <p className="text-sm text-muted-foreground">Workflow-based issue tracking and resolution</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <Button variant="outline" size="sm" onClick={fetchData} disabled={loading} className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => fetchData(activeTab === 'mine')} disabled={loading} className="gap-2">
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">Refresh</span>
             </Button>
-            {(isAdmin || canWrite) && (
+            {(isAdminRole || canWrite) && (
               <Button size="sm" onClick={() => setIsCreateOpen(true)}
                 className="bg-brand-500 hover:bg-brand-600 text-white gap-1.5">
                 <Plus className="h-4 w-4" />
@@ -591,7 +581,7 @@ export default function TicketsPage() {
               className="flex flex-col items-center gap-2 py-16 text-sm text-muted-foreground">
               <ClipboardList className="h-8 w-8 opacity-30" />
               <p>No tickets in this stage</p>
-              {(isAdmin || canWrite) && activeTab === 'all' && (
+              {(isAdminRole || canWrite) && activeTab === 'all' && (
                 <Button size="sm" variant="outline" onClick={() => setIsCreateOpen(true)} className="mt-2 gap-1.5">
                   <Plus className="h-4 w-4" /> Create first ticket
                 </Button>

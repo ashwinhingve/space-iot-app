@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { Menu, X, ChevronRight, ChevronDown, LogOut, Settings, LayoutDashboard, Crown, Zap } from 'lucide-react'
+import { Menu, X, ChevronRight, ChevronDown, LogOut, Settings, LayoutDashboard, Crown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { logout } from '@/store/slices/authSlice'
@@ -153,8 +153,8 @@ export function Navbar() {
               whileTap={{ scale: 0.95 }}
             >
               <div className="absolute inset-0 bg-[#00e5ff]/30 rounded-lg blur-md group-hover:bg-[#00e5ff]/50 transition-all duration-300" />
-              <div className="relative w-8 h-8 rounded-lg bg-gradient-to-br from-[#00e5ff] to-brand-600 flex items-center justify-center shadow-[0_0_16px_rgba(0,229,255,0.35)]">
-                <Zap className="w-4 h-4 text-white" strokeWidth={2.5} />
+              <div className="relative w-8 h-8 rounded-lg overflow-hidden shadow-[0_0_16px_rgba(0,229,255,0.35)]">
+                <img src="/icon.png" alt="SpaceIoT" className="w-full h-full object-contain" />
               </div>
             </motion.div>
             <motion.span
@@ -383,8 +383,8 @@ export function Navbar() {
               {/* Header */}
               <div className="flex items-center justify-between p-6 border-b border-border/50">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#00e5ff] to-brand-600 flex items-center justify-center shadow-[0_0_12px_rgba(0,229,255,0.3)]">
-                    <Zap className="w-4 h-4 text-white" strokeWidth={2.5} />
+                  <div className="w-8 h-8 rounded-lg overflow-hidden shadow-[0_0_12px_rgba(0,229,255,0.3)]">
+                    <img src="/icon.png" alt="SpaceIoT" className="w-full h-full object-contain" />
                   </div>
                   <span className="font-display font-bold text-xl">
                     <span className="text-foreground">Space</span>

@@ -6,6 +6,7 @@ import dashboardReducer from './slices/dashboardSlice';
 import ttnReducer from './slices/ttnSlice';
 import networkDeviceReducer from './slices/networkDeviceSlice';
 import configReducer from './slices/configSlice';
+import consoleReducer from './slices/consoleSlice';
 
 export const store = configureStore({
   reducer: {
@@ -16,6 +17,7 @@ export const store = configureStore({
     ttn: ttnReducer,
     networkDevices: networkDeviceReducer,
     config: configReducer,
+    console: consoleReducer,
   },
 });
 

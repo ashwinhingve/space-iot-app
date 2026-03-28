@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { User, UserRole, PagePermission, ALL_ROLES, ROLE_DEFAULT_PERMISSIONS, ALL_PAGES } from '../models/User';
+import { User, UserRole, PagePermission, ALL_ROLES, ROLE_DEFAULT_PERMISSIONS, ALL_PAGES, SUBPAGE_DEFINITIONS, ADMIN_EMAIL_CONST } from '../models/User';
 import { AdminAccessMode, SystemConfig, SystemMode, invalidateSystemModeCache } from '../models/SystemConfig';
 
 /**
@@ -11,7 +11,20 @@ export const getUsers = async (req: Request, res: Response) => {
     const skip = (Number(page) - 1) * Number(limit);
 
     const filter: any = {};
-    if (role && ALL_ROLES.includes(role as UserRole)) filter.role = role;
+
+    // Regular admins cannot see super_admin or other admin accounts
+    if (req.user.role !== 'super_admin') {
+      filter.role = { $nin: ['super_admin', 'admin'] };
+    }
+
+    if (role && ALL_ROLES.includes(role as UserRole)) {
+      // Only apply role filter if it doesn't conflict with visibility rule above
+      if (req.user.role === 'super_admin') {
+        filter.role = role;
+      } else if (!['super_admin', 'admin'].includes(role as string)) {
+        filter.role = role;
+      }
+    }
     if (status === 'active') filter.isActive = true;
     if (status === 'inactive') filter.isActive = false;
     if (search) {
@@ -55,13 +68,19 @@ export const getUsers = async (req: Request, res: Response) => {
  */
 export const createUser = async (req: Request, res: Response) => {
   try {
-    const { name, email, password, role, permissions, phone, department, village, project } = req.body;
+    const { name, email, password, role, permissions, subpagePermissions, phone, department, village, project, userType, purposeType } = req.body;
 
     if (!name || !email || !password || !role) {
       return res.status(400).json({
         error: 'Missing required fields',
         message: 'name, email, password, and role are required'
       });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(String(email).trim())) {
+      return res.status(400).json({ error: 'Invalid email format' });
     }
 
     if (!ALL_ROLES.includes(role as UserRole)) {
@@ -71,11 +90,11 @@ export const createUser = async (req: Request, res: Response) => {
       });
     }
 
-    // Prevent creating another admin
-    if (role === 'admin' && email !== 'spaceautomation29@gmail.com') {
+    // super_admin role cannot be assigned by anyone — it is reserved for the designated email
+    if (role === 'super_admin') {
       return res.status(403).json({
-        error: 'Cannot create admin',
-        message: 'Admin role can only be assigned to the designated admin email'
+        error: 'Cannot assign super_admin role',
+        message: 'The super_admin role is reserved and cannot be assigned manually'
       });
     }
 
@@ -93,18 +112,27 @@ export const createUser = async (req: Request, res: Response) => {
         ? permissions.filter((p: string) => ALL_PAGES.includes(p as PagePermission))
         : ROLE_DEFAULT_PERMISSIONS[role as UserRole] || ['dashboard'];
 
+    // Validate subpage permissions
+    const allValidSubpages = Object.values(SUBPAGE_DEFINITIONS).flat();
+    const validSubpagePerms: string[] = Array.isArray(subpagePermissions)
+      ? subpagePermissions.filter((s: string) => allValidSubpages.includes(s))
+      : [];
+
     const newUser = new User({
       name: name.trim(),
       email: email.toLowerCase().trim(),
       password,
       role,
       permissions: userPermissions,
+      subpagePermissions: validSubpagePerms,
       authProvider: 'local',
       isActive: true,
       phone: phone?.trim() || undefined,
       department: department?.trim() || undefined,
       village: village?.trim() || undefined,
       project: project?.trim() || undefined,
+      userType: userType || 'team',
+      purposeType: purposeType || undefined,
       roleAssignedBy: req.user._id,
       roleAssignedAt: new Date()
     });
@@ -146,17 +174,27 @@ export const updateUserRole = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    if (targetUser.email === 'spaceautomation29@gmail.com' && role !== 'admin') {
+    // super_admin role cannot be assigned to anyone
+    if (role === 'super_admin') {
       return res.status(403).json({
-        error: 'Cannot change admin role',
-        message: 'The primary admin account role cannot be changed'
+        error: 'Cannot assign super_admin role',
+        message: 'The super_admin role is reserved and cannot be assigned manually'
       });
     }
 
-    if (role === 'admin' && targetUser.email !== 'spaceautomation29@gmail.com') {
+    // Protect the designated super admin email — its role cannot be changed
+    if (targetUser.email === ADMIN_EMAIL_CONST) {
       return res.status(403).json({
-        error: 'Cannot assign admin role',
-        message: 'Admin role can only be assigned to the designated admin email'
+        error: 'Cannot change super admin role',
+        message: 'The super admin account role cannot be changed'
+      });
+    }
+
+    // Regular admins cannot modify other admin or super_admin accounts
+    if (req.user.role !== 'super_admin' && ['admin', 'super_admin'].includes(targetUser.role)) {
+      return res.status(403).json({
+        error: 'Insufficient permissions',
+        message: 'Only the super admin can modify admin accounts'
       });
     }
 
@@ -187,7 +225,7 @@ export const updateUserRole = async (req: Request, res: Response) => {
 export const updateUserPermissions = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { permissions } = req.body;
+    const { permissions, subpagePermissions } = req.body;
 
     if (!Array.isArray(permissions)) {
       return res.status(400).json({
@@ -200,17 +238,33 @@ export const updateUserPermissions = async (req: Request, res: Response) => {
       ALL_PAGES.includes(p as PagePermission)
     ) as PagePermission[];
 
+    // Validate subpage permissions
+    const allValidSubpages = Object.values(SUBPAGE_DEFINITIONS).flat();
+    const validSubpagePerms: string[] = Array.isArray(subpagePermissions)
+      ? subpagePermissions.filter((s: string) => allValidSubpages.includes(s))
+      : [];
+
     const targetUser = await User.findById(id);
     if (!targetUser) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Admin always keeps admin permission
-    if (targetUser.email === 'spaceautomation29@gmail.com') {
+    // Protect admin/super_admin accounts from being modified by regular admins
+    if (req.user.role !== 'super_admin' && ['admin', 'super_admin'].includes(targetUser.role)) {
+      return res.status(403).json({
+        error: 'Insufficient permissions',
+        message: 'Only the super admin can modify admin account permissions'
+      });
+    }
+
+    // Super admin always retains super_admin permission (cannot be stripped)
+    if (targetUser.email === ADMIN_EMAIL_CONST) {
+      if (!validPermissions.includes('super_admin')) validPermissions.push('super_admin');
       if (!validPermissions.includes('admin')) validPermissions.push('admin');
     }
 
     targetUser.permissions = validPermissions;
+    targetUser.subpagePermissions = validSubpagePerms;
     await targetUser.save();
 
     console.log(`Admin ${req.user.email} updated permissions of ${targetUser.email}`);
@@ -238,6 +292,14 @@ export const updateUserProfile = async (req: Request, res: Response) => {
     const targetUser = await User.findById(id);
     if (!targetUser) {
       return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Regular admins cannot modify admin or super_admin accounts
+    if (req.user.role !== 'super_admin' && ['admin', 'super_admin'].includes(targetUser.role)) {
+      return res.status(403).json({
+        error: 'Insufficient permissions',
+        message: 'Only the super admin can modify admin account profiles'
+      });
     }
 
     if (name) targetUser.name = name.trim();
@@ -276,10 +338,19 @@ export const toggleUserActive = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    if (targetUser.email === 'spaceautomation29@gmail.com') {
+    // Protect the designated super admin from being disabled
+    if (targetUser.email === ADMIN_EMAIL_CONST) {
       return res.status(403).json({
-        error: 'Cannot disable admin',
-        message: 'The primary admin account cannot be disabled'
+        error: 'Cannot disable super admin',
+        message: 'The super admin account cannot be disabled'
+      });
+    }
+
+    // Regular admins cannot toggle active status on admin/super_admin accounts
+    if (req.user.role !== 'super_admin' && ['admin', 'super_admin'].includes(targetUser.role)) {
+      return res.status(403).json({
+        error: 'Insufficient permissions',
+        message: 'Only the super admin can enable/disable admin accounts'
       });
     }
 
@@ -318,10 +389,19 @@ export const deleteUser = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    if (targetUser.email === 'spaceautomation29@gmail.com') {
+    // The super admin account can never be deleted
+    if (targetUser.email === ADMIN_EMAIL_CONST) {
       return res.status(403).json({
-        error: 'Cannot delete admin',
-        message: 'The primary admin account cannot be deleted'
+        error: 'Cannot delete super admin',
+        message: 'The super admin account cannot be deleted'
+      });
+    }
+
+    // Regular admins cannot delete other admin/super_admin accounts
+    if (req.user.role !== 'super_admin' && ['admin', 'super_admin'].includes(targetUser.role)) {
+      return res.status(403).json({
+        error: 'Insufficient permissions',
+        message: 'Only the super admin can delete admin accounts'
       });
     }
 
@@ -350,10 +430,15 @@ export const deleteUser = async (req: Request, res: Response) => {
  */
 export const getStats = async (req: Request, res: Response) => {
   try {
+    // Regular admins only see stats for non-admin/non-super_admin users
+    const statsFilter = req.user.role !== 'super_admin' ? { role: { $nin: ['super_admin', 'admin'] } } : {};
+    const statsFilterActive = req.user.role !== 'super_admin' ? { role: { $nin: ['super_admin', 'admin'] }, isActive: true } : { isActive: true };
+
     const [total, active, byRole] = await Promise.all([
-      User.countDocuments(),
-      User.countDocuments({ isActive: true }),
+      User.countDocuments(statsFilter),
+      User.countDocuments(statsFilterActive),
       User.aggregate([
+        ...(req.user.role !== 'super_admin' ? [{ $match: { role: { $nin: ['super_admin', 'admin'] } } }] : []),
         { $group: { _id: '$role', count: { $sum: 1 }, active: { $sum: { $cond: ['$isActive', 1, 0] } } } }
       ])
     ]);

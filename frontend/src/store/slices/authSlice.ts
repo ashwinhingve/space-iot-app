@@ -14,6 +14,10 @@ interface User {
   department?: string;
   village?: string;
   project?: string;
+  userType?: 'individual' | 'team';
+  purposeType?: string;
+  purposeDescription?: string;
+  subpagePermissions?: string[];
   createdAt: string;
 }
 
@@ -36,7 +40,8 @@ const getStoredToken = (): string | null => {
 const getStoredUser = (): User | null => {
   if (!isBrowser) return null;
   const userStr = localStorage.getItem('user');
-  return userStr ? JSON.parse(userStr) : null;
+  if (!userStr) return null;
+  try { return JSON.parse(userStr); } catch { return null; }
 };
 
 const saveAuthData = (token: string, user: User) => {
@@ -99,7 +104,7 @@ export const login = createAsyncThunk(
  */
 export const setupSystem = createAsyncThunk(
   'auth/setup',
-  async (userData: { name: string; email: string; password: string }, { rejectWithValue }) => {
+  async (userData: { name: string; email: string; password: string; userType?: string; purposeType?: string; purposeDescription?: string }, { rejectWithValue }) => {
     try {
       const response = await fetch(API_ENDPOINTS.SETUP, {
         method: 'POST',
@@ -121,7 +126,7 @@ export const setupSystem = createAsyncThunk(
  */
 export const register = createAsyncThunk(
   'auth/register',
-  async (userData: { name: string; email: string; password: string }, { rejectWithValue }) => {
+  async (userData: { name: string; email: string; password: string; userType?: string; purposeType?: string; purposeDescription?: string }, { rejectWithValue }) => {
     try {
       const response = await fetch(API_ENDPOINTS.REGISTER, {
         method: 'POST',
@@ -219,6 +224,67 @@ export const getCurrentUser = createAsyncThunk(
       // Network/fetch error — backend may be temporarily unreachable.
       // Do NOT clear localStorage; the token is likely still valid.
       return rejectWithValue('NETWORK_ERROR');
+    }
+  }
+);
+
+/**
+ * Update current user's profile
+ */
+export const updateProfile = createAsyncThunk(
+  'auth/updateProfile',
+  async (profileData: Partial<Pick<User, 'name' | 'phone' | 'department' | 'village' | 'project' | 'userType' | 'purposeType' | 'purposeDescription'>>, { getState, rejectWithValue }) => {
+    try {
+      const state = getState() as { auth: AuthState };
+      const token = state.auth.token;
+      if (!token) return rejectWithValue('Not authenticated');
+
+      const response = await fetch(API_ENDPOINTS.AUTH_PROFILE, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(profileData),
+      });
+
+      const data = await response.json();
+      if (!response.ok) return rejectWithValue(data.message || 'Update failed');
+
+      // Sync updated user to localStorage
+      saveAuthData(token, data.user);
+      return data;
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Network error');
+    }
+  }
+);
+
+/**
+ * Change current user's password
+ */
+export const updatePassword = createAsyncThunk(
+  'auth/updatePassword',
+  async (payload: { currentPassword: string; newPassword: string }, { getState, rejectWithValue }) => {
+    try {
+      const state = getState() as { auth: AuthState };
+      const token = state.auth.token;
+      if (!token) return rejectWithValue('Not authenticated');
+
+      const response = await fetch(API_ENDPOINTS.AUTH_PASSWORD, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+      if (!response.ok) return rejectWithValue(data.message || 'Password update failed');
+      return data;
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Network error');
     }
   }
 );
@@ -329,7 +395,7 @@ const authSlice = createSlice({
         state.error = null;
       })
       .addCase(getCurrentUser.rejected, (state, action) => {
-        state.loading = false;
+        state.loading = false; // Always clear loading, even on network errors
         // Only clear auth state on real auth failures (expired/invalid token).
         // For network errors the token may still be valid — keep the user logged in.
         if (action.payload !== 'NETWORK_ERROR') {
@@ -337,6 +403,33 @@ const authSlice = createSlice({
           state.token = null;
           state.isAuthenticated = false;
         }
+      })
+      // Update Profile
+      .addCase(updateProfile.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(updateProfile.fulfilled, (state, action) => {
+        state.loading = false;
+        state.user = action.payload.user;
+        state.error = null;
+      })
+      .addCase(updateProfile.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string || 'Update failed';
+      })
+      // Update Password
+      .addCase(updatePassword.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(updatePassword.fulfilled, (state) => {
+        state.loading = false;
+        state.error = null;
+      })
+      .addCase(updatePassword.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string || 'Password update failed';
       });
   },
 });

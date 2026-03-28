@@ -13,9 +13,10 @@ import { STAGE_CONFIG, WorkflowStage, TicketPriority, TicketCategory, TicketSumm
 import {
   ArrowLeft, CheckCircle, AlertTriangle, Loader2,
   MessageSquare, FileText, ChevronRight, Clock,
-  User, Calendar, MapPin, Phone, Building2, Tag,
+  User, Calendar, MapPin, Building2, Tag,
   Send, XCircle, RotateCcw, Check, Flag,
-  Download, Paperclip, Info, Zap, AlertCircle
+  Download, Paperclip, Info, Zap, AlertCircle,
+  StickyNote, UserCheck, RefreshCw
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -54,17 +55,23 @@ interface TicketDocument {
   uploadedAt: string;
 }
 
+interface TicketNote {
+  _id: string;
+  byName: string;
+  byRole: string;
+  content: string;
+  timestamp: string;
+}
+
 interface TicketDetail extends TicketSummary {
   minar?: string;
   oms?: string;
-  kasra?: string;
-  contactName?: string;
-  contactMobile?: string;
   rejectedFrom?: WorkflowStage;
   rejectionReason?: string;
   workflowHistory: WorkflowHistoryEntry[];
   comments: Comment[];
   documents: TicketDocument[];
+  notes: TicketNote[];
 }
 
 // ─── Stage who can advance ────────────────────────────────────────────────────
@@ -287,7 +294,7 @@ function ActionPanel({ ticket, token, onUpdated, showToast }: {
   onUpdated: (t: TicketDetail) => void;
   showToast: (msg: string, type?: 'success' | 'error') => void;
 }) {
-  const { role, isAdmin } = useRole();
+  const { role, isAdminRole: isAdmin } = useRole();
   const [commentText, setCommentText] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [advanceNote, setAdvanceNote] = useState('');
@@ -470,16 +477,29 @@ function DetailField({ label, value, icon: Icon }: { label: string; value?: stri
 export default function TicketDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
-  useRole();
+  const { isAdminRole, isSuperAdmin, role } = useRole();
   const token = useSelector((s: RootState) => s.auth.token);
 
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [activeSection, setActiveSection] = useState<'timeline' | 'docs'>('timeline');
+  const [activeSection, setActiveSection] = useState<'timeline' | 'notes' | 'docs'>('timeline');
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
-  const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  // Notes state
+  const [noteText, setNoteText] = useState('');
+  const [noteSaving, setNoteSaving] = useState(false);
+
+  // Assignment state
+  const [assignUsers, setAssignUsers] = useState<{ _id: string; name: string; role: string }[]>([]);
+  const [assignSearch, setAssignSearch] = useState('');
+  const [assignSaving, setAssignSaving] = useState(false);
+  const [showAssign, setShowAssign] = useState(false);
+
+  const authHeaders = useMemo(() => ({
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  }), [token]);
 
   const showToast = useCallback((msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ msg, type });
@@ -503,6 +523,58 @@ export default function TicketDetailPage() {
   }, [params.id, authHeaders]);
 
   useEffect(() => { fetchTicket(); }, [fetchTicket]);
+
+  const addNote = useCallback(async () => {
+    if (!noteText.trim() || !ticket) return;
+    setNoteSaving(true);
+    try {
+      const res = await fetch(API_ENDPOINTS.TICKET_NOTE(ticket._id), {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ content: noteText.trim() }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.message || 'Failed');
+      setTicket(d.ticket);
+      setNoteText('');
+      showToast('Note added');
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : 'Failed', 'error');
+    } finally {
+      setNoteSaving(false);
+    }
+  }, [noteText, ticket, authHeaders, showToast]);
+
+  const fetchAssignUsers = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_ENDPOINTS.ADMIN_USERS}?limit=100`, { headers: authHeaders });
+      if (res.ok) {
+        const d = await res.json();
+        setAssignUsers(d.users ?? []);
+      }
+    } catch { /* silently ignore */ }
+  }, [authHeaders]);
+
+  const doAssign = useCallback(async (userId: string | null) => {
+    if (!ticket) return;
+    setAssignSaving(true);
+    try {
+      const res = await fetch(API_ENDPOINTS.TICKET_ASSIGN(ticket._id), {
+        method: 'PATCH',
+        headers: authHeaders,
+        body: JSON.stringify({ assignedTo: userId }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.message || 'Failed');
+      setTicket(d.ticket);
+      setShowAssign(false);
+      showToast(userId ? 'Ticket assigned' : 'Assignment removed');
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : 'Failed', 'error');
+    } finally {
+      setAssignSaving(false);
+    }
+  }, [ticket, authHeaders, showToast]);
 
   if (loading) {
     return (
@@ -606,7 +678,7 @@ export default function TicketDetailPage() {
             </div>
 
             {/* Location card */}
-            {(ticket.village || ticket.minar || ticket.projectName || ticket.oms || ticket.kasra) && (
+            {(ticket.village || ticket.minar || ticket.projectName || ticket.oms) && (
               <div className="rounded-xl border border-border/40 p-4 space-y-3">
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Location</p>
                 <div className="space-y-2">
@@ -614,19 +686,79 @@ export default function TicketDetailPage() {
                   <DetailField label="Minar" value={ticket.minar} icon={Flag} />
                   <DetailField label="Project" value={ticket.projectName} icon={Building2} />
                   <DetailField label="OMS" value={ticket.oms} icon={Building2} />
-                  <DetailField label="Kasra" value={ticket.kasra} />
                 </div>
               </div>
             )}
 
-            {/* Contact card */}
-            {(ticket.contactName || ticket.contactMobile) && (
+            {/* Assignment panel (admin only) */}
+            {isAdminRole && (
               <div className="rounded-xl border border-border/40 p-4 space-y-3">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contact</p>
-                <div className="space-y-2">
-                  <DetailField label="Name" value={ticket.contactName} icon={User} />
-                  <DetailField label="Mobile" value={ticket.contactMobile} icon={Phone} />
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <UserCheck className="h-3.5 w-3.5" /> Assignment
+                  </p>
+                  <button
+                    onClick={() => { setShowAssign(v => !v); if (!showAssign) fetchAssignUsers(); }}
+                    className="text-xs text-brand-400 hover:text-brand-300 transition-colors"
+                  >
+                    {showAssign ? 'Cancel' : ticket.assignedTo ? 'Reassign' : 'Assign'}
+                  </button>
                 </div>
+                {ticket.assignedTo ? (
+                  <div className="flex items-center gap-2">
+                    <div className="h-7 w-7 rounded-full bg-gradient-to-br from-brand-500/30 to-purple-500/30 flex items-center justify-center text-[10px] font-bold shrink-0">
+                      {ticket.assignedTo.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{ticket.assignedTo.name}</p>
+                      <RoleBadge role={ticket.assignedTo.role} size="sm" />
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground/60 italic">Not assigned</p>
+                )}
+                {showAssign && (
+                  <div className="space-y-2">
+                    <input
+                      value={assignSearch}
+                      onChange={e => setAssignSearch(e.target.value)}
+                      placeholder="Search team member…"
+                      className="w-full h-8 rounded-lg border border-border/50 bg-background px-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500/30"
+                    />
+                    <div className="max-h-40 overflow-y-auto space-y-0.5 rounded-lg border border-border/30">
+                      {ticket.assignedTo && (
+                        <button
+                          onClick={() => doAssign(null)}
+                          disabled={assignSaving}
+                          className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
+                        >
+                          Remove assignment
+                        </button>
+                      )}
+                      {assignUsers
+                        .filter(u => !assignSearch || u.name.toLowerCase().includes(assignSearch.toLowerCase()))
+                        .map(u => (
+                          <button
+                            key={u._id}
+                            onClick={() => doAssign(u._id)}
+                            disabled={assignSaving}
+                            className="w-full text-left flex items-center gap-2 px-3 py-2 hover:bg-secondary/50 transition-colors"
+                          >
+                            <div className="h-5 w-5 rounded-full bg-gradient-to-br from-brand-500/30 to-purple-500/30 flex items-center justify-center text-[9px] font-bold shrink-0">
+                              {u.name.charAt(0).toUpperCase()}
+                            </div>
+                            <span className="text-xs flex-1 truncate">{u.name}</span>
+                            <RoleBadge role={u.role} size="sm" />
+                          </button>
+                        ))}
+                    </div>
+                    {assignSaving && (
+                      <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground py-1">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Saving…
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -638,13 +770,14 @@ export default function TicketDetailPage() {
           <div className="lg:col-span-2 space-y-4">
             <div className="rounded-xl border border-border/40 overflow-hidden">
               {/* Section toggle */}
-              <div className="flex border-b border-border/30">
+              <div className="flex border-b border-border/30 overflow-x-auto">
                 {[
                   { id: 'timeline' as const, label: `Activity (${buildTimeline(ticket).length})`, icon: Clock },
+                  { id: 'notes' as const, label: `Notes (${ticket.notes?.length ?? 0})`, icon: StickyNote },
                   { id: 'docs' as const, label: `Documents (${ticket.documents.length})`, icon: FileText },
                 ].map(s => (
                   <button key={s.id} onClick={() => setActiveSection(s.id)}
-                    className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium transition-all border-b-2 -mb-px ${
+                    className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium transition-all border-b-2 -mb-px whitespace-nowrap ${
                       activeSection === s.id ? 'border-brand-500 text-brand-400' : 'border-transparent text-muted-foreground hover:text-foreground'
                     }`}>
                     <s.icon className="h-4 w-4" />
@@ -655,6 +788,54 @@ export default function TicketDetailPage() {
 
               <div className="p-4">
                 {activeSection === 'timeline' && <TimelineView ticket={ticket} />}
+
+                {activeSection === 'notes' && (
+                  <div className="space-y-4">
+                    {/* Notes list */}
+                    {!ticket.notes || ticket.notes.length === 0 ? (
+                      <div className="flex flex-col items-center gap-2 py-6 text-muted-foreground">
+                        <StickyNote className="h-7 w-7 opacity-30" />
+                        <p className="text-sm">No internal notes yet</p>
+                        <p className="text-xs text-muted-foreground/60">Use notes for internal progress updates</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {ticket.notes.map(note => (
+                          <div key={note._id} className="flex items-start gap-3 rounded-lg border border-border/30 bg-secondary/5 p-3">
+                            <div className="h-7 w-7 rounded-full bg-gradient-to-br from-amber-500/30 to-orange-500/30 flex items-center justify-center text-[10px] font-bold text-amber-400 shrink-0">
+                              {note.byName.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap mb-1">
+                                <span className="text-xs font-semibold">{note.byName}</span>
+                                <RoleBadge role={note.byRole} size="sm" />
+                                <span className="text-[10px] text-muted-foreground/50">{new Date(note.timestamp).toLocaleString()}</span>
+                              </div>
+                              <p className="text-sm text-foreground/80 whitespace-pre-wrap">{note.content}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* Add note form */}
+                    <div className="border-t border-border/30 pt-4 space-y-2">
+                      <textarea
+                        value={noteText}
+                        onChange={e => setNoteText(e.target.value)}
+                        rows={3}
+                        placeholder="Add an internal note or progress update…"
+                        className="w-full rounded-lg border border-border/50 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30 resize-none"
+                      />
+                      <Button size="sm"
+                        onClick={addNote}
+                        disabled={noteSaving || !noteText.trim()}
+                        className="bg-amber-600 hover:bg-amber-700 text-white gap-1.5">
+                        {noteSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <StickyNote className="h-4 w-4" />}
+                        Add Note
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
                 {activeSection === 'docs' && (
                   <div>

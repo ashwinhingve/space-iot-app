@@ -8,11 +8,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Radio, Activity, Map, BarChart3,
   Ticket, FileText, ShieldAlert, LogOut, ChevronLeft,
-  Zap, Menu, X,
+  Menu, X, Settings, LayoutGrid,
 } from 'lucide-react';
 import { RootState, AppDispatch } from '@/store/store';
 import { logout } from '@/store/slices/authSlice';
-import { useRole, PagePermission } from '@/hooks/useRole';
+import { useRole, PagePermission, ROLE_LABELS } from '@/hooks/useRole';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
 // ─── Nav config ───────────────────────────────────────────────────────────────
@@ -20,6 +20,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 const PRIMARY_NAV = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, permission: 'dashboard' as PagePermission },
   { label: 'Devices',   href: '/devices',   icon: Radio,           permission: 'devices'   as PagePermission },
+  { label: 'Console',   href: '/console',   icon: LayoutGrid,      permission: 'console'   as PagePermission },
   { label: 'SCADA',     href: '/scada',     icon: Activity,        permission: 'scada'     as PagePermission },
   { label: 'OMS',       href: '/oms',       icon: Map,             permission: 'oms'       as PagePermission },
   { label: 'Reports',   href: '/reports',   icon: BarChart3,       permission: 'reports'   as PagePermission },
@@ -163,9 +164,10 @@ export function AppSidebar() {
 
   const roleLabel = (user?.role as string | undefined) ?? 'operator';
   const roleColor =
-    roleLabel === 'admin'    ? 'text-red-400 bg-red-500/10 border-red-500/20' :
-    roleLabel === 'engineer' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' :
-                               'text-sky-400 bg-sky-500/10 border-sky-500/20';
+    roleLabel === 'super_admin' ? 'text-purple-400 bg-purple-500/10 border-purple-500/20' :
+    roleLabel === 'admin'       ? 'text-red-400 bg-red-500/10 border-red-500/20' :
+    roleLabel === 'engineer'    ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' :
+                                  'text-sky-400 bg-sky-500/10 border-sky-500/20';
 
   const SidebarInner = ({ isMobile = false }: { isMobile?: boolean }) => {
     const isCollapsed = collapsed && !isMobile;
@@ -177,10 +179,7 @@ export function AppSidebar() {
         <div className={`flex items-center h-14 border-b border-border/40 shrink-0 ${isCollapsed ? 'justify-center px-3' : 'px-4 gap-3'}`}>
           {/* Icon */}
           <div className="relative shrink-0">
-            <div className="absolute inset-0 bg-[#00e5ff]/25 rounded-xl blur-md" />
-            <div className="relative w-8 h-8 rounded-xl bg-gradient-to-br from-[#00e5ff] to-brand-600 flex items-center justify-center shadow-[0_0_14px_rgba(0,229,255,0.3)]">
-              <Zap className="w-4 h-4 text-white" strokeWidth={2.5} />
-            </div>
+            <img src="/icon.png" alt="Space IoT" className="w-8 h-8 rounded-xl object-contain" />
           </div>
 
           <AnimatePresence initial={false}>
@@ -291,7 +290,7 @@ export function AppSidebar() {
                       {user.name || user.email}
                     </p>
                     <span className={`inline-flex items-center mt-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold border capitalize ${roleColor}`}>
-                      {roleLabel}
+                      {ROLE_LABELS[roleLabel] ?? roleLabel}
                     </span>
                   </div>
                 </div>
@@ -315,6 +314,14 @@ export function AppSidebar() {
           {/* Actions row */}
           <div className={`flex items-center ${isCollapsed ? 'flex-col gap-1' : 'gap-1'}`}>
             <ThemeToggle />
+            <Link
+              href="/settings"
+              title="Settings"
+              aria-label="Settings"
+              className="p-2 rounded-xl text-muted-foreground/60 hover:text-foreground hover:bg-muted/60 transition-colors"
+            >
+              <Settings style={{ width: 15, height: 15 }} />
+            </Link>
             <button
               onClick={handleLogout}
               title="Sign out"

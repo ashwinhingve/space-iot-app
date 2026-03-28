@@ -10,7 +10,7 @@ import { GoogleAuthButton } from '@/components/GoogleAuthButton';
 import { PasswordStrength } from '@/components/PasswordStrength';
 import { RootState, AppDispatch } from '@/store/store';
 import {
-  ArrowRight, Lock, Mail, User, AlertCircle, Zap, Eye, EyeOff,
+  ArrowRight, Lock, Mail, User, AlertCircle, Eye, EyeOff,
   CheckCircle, Shield, Users, Activity, Radio, BarChart3, Ticket,
 } from 'lucide-react';
 
@@ -173,6 +173,15 @@ function PasswordField({
 
 // ─── Register form ────────────────────────────────────────────────────────────
 
+const PURPOSE_OPTIONS = [
+  { value: 'water_management', label: 'Water Management' },
+  { value: 'agriculture',      label: 'Agriculture' },
+  { value: 'industrial_iot',   label: 'Industrial IoT' },
+  { value: 'smart_city',       label: 'Smart City' },
+  { value: 'research',         label: 'Research' },
+  { value: 'other',            label: 'Other' },
+];
+
 function RegisterForm() {
   const searchParams = useSearchParams();
   const [name, setName] = useState('');
@@ -182,6 +191,8 @@ function RegisterForm() {
   const [validationError, setValidationError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [focused, setFocused] = useState<string | null>(null);
+  const [purposeType, setPurposeType] = useState('water_management');
+  const [purposeDescription, setPurposeDescription] = useState('');
   const [mode, setMode] = useState<'individual' | 'team'>(
     searchParams.get('mode') === 'individual' ? 'individual' : 'team'
   );
@@ -214,16 +225,21 @@ function RegisterForm() {
     try {
       if (mode === 'individual') {
         try {
-          await dispatch(setupSystem({ name, email, password })).unwrap();
+          await dispatch(setupSystem({ name, email, password, userType: 'individual' })).unwrap();
           setSuccessMsg('System configured! You are now the administrator.');
         } catch (err: unknown) {
           const msg = typeof err === 'string' ? err : (err as { message?: string })?.message ?? '';
           if (msg.toLowerCase().includes('already') || msg.toLowerCase().includes('complete')) {
-            await dispatch(register({ name, email, password })).unwrap();
+            await dispatch(register({ name, email, password, userType: 'individual' })).unwrap();
           } else throw err;
         }
       } else {
-        await dispatch(register({ name, email, password })).unwrap();
+        await dispatch(register({
+          name, email, password,
+          userType: 'team',
+          purposeType,
+          purposeDescription: purposeDescription.trim() || undefined,
+        })).unwrap();
       }
       router.push(redirectTo);
     } catch { /* shown via state */ }
@@ -271,9 +287,7 @@ function RegisterForm() {
         >
           <div className="relative">
             <div className="absolute inset-0 bg-[#00e5ff]/30 rounded-xl blur-md" />
-            <div className="relative w-10 h-10 rounded-xl bg-gradient-to-br from-[#00e5ff] to-brand-600 flex items-center justify-center shadow-[0_0_20px_rgba(0,229,255,0.4)]">
-              <Zap className="w-5 h-5 text-white" strokeWidth={2.5} />
-            </div>
+            <img src="/icon.png" alt="Space IoT" className="relative w-10 h-10 rounded-xl object-contain shadow-[0_0_20px_rgba(0,229,255,0.4)]" />
           </div>
           <div>
             <p className="font-display font-bold text-xl leading-none text-white">
@@ -370,9 +384,7 @@ function RegisterForm() {
         <div className="lg:hidden flex items-center gap-2.5 px-6 pt-6">
           <div className="relative">
             <div className="absolute inset-0 bg-[#00e5ff]/20 rounded-xl blur-sm" />
-            <div className="relative w-8 h-8 rounded-xl bg-gradient-to-br from-[#00e5ff] to-brand-600 flex items-center justify-center">
-              <Zap className="w-4 h-4 text-white" strokeWidth={2.5} />
-            </div>
+            <img src="/icon.png" alt="Space IoT" className="relative w-8 h-8 rounded-xl object-contain" />
           </div>
           <span className="font-display font-bold text-xl">
             <span className="text-foreground">Space</span>
@@ -422,6 +434,42 @@ function RegisterForm() {
                 );
               })}
             </div>
+
+            {/* Purpose fields (team mode only) */}
+            <AnimatePresence>
+              {mode === 'team' && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                  className="space-y-3 overflow-hidden"
+                >
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Purpose Type</label>
+                    <select
+                      value={purposeType}
+                      onChange={e => setPurposeType(e.target.value)}
+                      className="w-full px-3.5 py-3 rounded-xl border border-border/60 bg-background text-sm outline-none focus:border-[#00e5ff]/50 focus:ring-4 focus:ring-[#00e5ff]/6 transition-all"
+                    >
+                      {PURPOSE_OPTIONS.map(o => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      Purpose Description <span className="normal-case font-normal text-muted-foreground/50">(optional)</span>
+                    </label>
+                    <textarea
+                      value={purposeDescription}
+                      onChange={e => setPurposeDescription(e.target.value.slice(0, 500))}
+                      placeholder="Describe how you plan to use RTC features…"
+                      rows={2}
+                      className="w-full px-3.5 py-3 rounded-xl border border-border/60 bg-background text-sm outline-none focus:border-[#00e5ff]/50 focus:ring-4 focus:ring-[#00e5ff]/6 transition-all resize-none placeholder:text-muted-foreground/40"
+                    />
+                    <p className="text-xs text-muted-foreground/40 text-right">{purposeDescription.length}/500</p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Google sign-up */}
             <GoogleAuthButton redirectTo={redirectTo} onError={console.error} />

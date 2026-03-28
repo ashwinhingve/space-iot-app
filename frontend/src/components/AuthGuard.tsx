@@ -11,7 +11,7 @@ interface AuthGuardProps {
 }
 
 // Routes that require authentication
-const protectedRoutes = ['/dashboard', '/devices', '/manifolds', '/device', '/ttn', '/scada', '/oms', '/reports', '/sld', '/command-area-map', '/admin', '/tickets', '/documents'];
+const protectedRoutes = ['/dashboard', '/devices', '/manifolds', '/device', '/ttn', '/scada', '/oms', '/reports', '/sld', '/command-area-map', '/admin', '/tickets', '/documents', '/settings', '/onboarding'];
 
 // Routes that are only accessible to admins
 const adminOnlyRoutes = ['/admin'];

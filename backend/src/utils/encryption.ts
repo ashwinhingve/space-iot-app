@@ -28,6 +28,9 @@ export function encrypt(plaintext: string): string {
 
 export function decrypt(ciphertext: string): string {
   const parts = ciphertext.split(':');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    throw new Error('Invalid ciphertext format: expected "iv:encryptedData"');
+  }
   const iv = Buffer.from(parts[0], 'hex');
   const encryptedText = parts[1];
   const decipher = crypto.createDecipheriv(ALGORITHM, getEncryptionKey(), iv);

@@ -1,5 +1,5 @@
 import express from 'express';
-import { register, login, getMe, googleAuth, logout, setupSystem } from '../controllers/authController';
+import { register, login, getMe, googleAuth, logout, setupSystem, updateProfile, updatePassword } from '../controllers/authController';
 import { auth } from '../middleware/auth';
 import { authLimiter } from '../middleware/rateLimiter';
 
@@ -13,6 +13,8 @@ router.post('/setup', authLimiter, setupSystem);   // First-time individual mode
 
 // Protected routes (require authentication)
 router.get('/me', auth, getMe);
+router.put('/profile', auth, updateProfile);
+router.put('/password', auth, updatePassword);
 router.post('/logout', auth, logout);
 
 export default router; 

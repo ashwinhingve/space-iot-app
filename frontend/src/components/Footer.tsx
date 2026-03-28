@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { motion } from 'framer-motion'
-import { Mail, Linkedin, Zap, ArrowUpRight } from 'lucide-react'
+import { Mail, Linkedin, ArrowUpRight } from 'lucide-react'
 
 const footerLinks = [
   {
@@ -96,8 +96,8 @@ export function Footer() {
             <Link href="/" className="inline-flex items-center gap-2.5 group mb-5">
               <div className="relative">
                 <div className="absolute inset-0 bg-[#00e5ff]/25 rounded-lg blur-sm group-hover:bg-[#00e5ff]/40 transition-all duration-300" />
-                <div className="relative w-8 h-8 rounded-lg bg-gradient-to-br from-[#00e5ff] to-brand-600 flex items-center justify-center shadow-[0_0_14px_rgba(0,229,255,0.3)]">
-                  <Zap className="w-4 h-4 text-white" strokeWidth={2.5} />
+                <div className="relative w-8 h-8 rounded-lg overflow-hidden shadow-[0_0_14px_rgba(0,229,255,0.3)]">
+                  <img src="/icon.png" alt="SpaceIoT" className="w-full h-full object-contain" />
                 </div>
               </div>
               <span className="font-display font-bold text-[1.3rem] leading-none tracking-wide">
@@ -113,8 +113,8 @@ export function Footer() {
             {/* Contact card */}
             <div className="p-4 rounded-xl border border-border/40 bg-card/60 backdrop-blur-sm mb-5">
               <div className="flex items-center gap-2 mb-1.5">
-                <div className="w-5 h-5 rounded-md bg-[#00e5ff]/10 border border-[#00e5ff]/20 flex items-center justify-center">
-                  <Zap className="w-3 h-3 text-[#00e5ff]" />
+                <div className="w-5 h-5 rounded-md overflow-hidden">
+                  <img src="/icon.png" alt="Space Autotech" className="w-full h-full object-contain" />
                 </div>
                 <span className="text-sm font-semibold text-foreground font-display">Space Autotech</span>
               </div>

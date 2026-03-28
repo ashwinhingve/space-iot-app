@@ -13,7 +13,7 @@ import { RootState } from '@/store/store';
 const APP_ROUTE_PREFIXES = [
   '/dashboard', '/devices', '/scada', '/oms', '/reports',
   '/tickets', '/documents', '/admin', '/manifolds', '/ttn',
-  '/webscada', '/sld', '/command-area-map',
+  '/webscada', '/sld', '/command-area-map', '/settings', '/console',
 ];
 
 interface MainLayoutProps {

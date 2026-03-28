@@ -31,7 +31,9 @@ import {
   AlertTriangle,
   CheckCircle,
   Filter,
+  Shield,
 } from 'lucide-react';
+import { useRole } from '@/hooks/useRole';
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -134,7 +136,10 @@ function StatChip({ label, value, cls }: { label: string; value: React.ReactNode
 
 export default function ReportsPage() {
   const dispatch = useDispatch<AppDispatch>();
-  const [activeTab, setActiveTab] = useState<ReportTab>('pump');
+  const { canAccessSubpage } = useRole();
+
+  const visibleTabs = REPORT_TABS.filter(t => canAccessSubpage('reports', t.id));
+  const [activeTab, setActiveTab] = useState<ReportTab>(() => visibleTabs[0]?.id ?? 'pump');
   const [detailsLoaded, setDetailsLoaded] = useState(false);
   const [rssiDateRange, setRssiDateRange] = useState<DateRange>('30d');
   const [rssiDeviceFilter, setRssiDeviceFilter] = useState<string>('ALL');
@@ -345,7 +350,7 @@ export default function ReportsPage() {
             transition={{ delay: 0.15, duration: 0.4 }}
             className="flex flex-wrap gap-2"
           >
-            {REPORT_TABS.map((tab) => (
+            {visibleTabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
@@ -358,6 +363,17 @@ export default function ReportsPage() {
               </button>
             ))}
           </motion.div>
+
+          {/* ─── No access ───────────────────────────────────────────── */}
+          {visibleTabs.length === 0 && (
+            <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-border/40 bg-secondary/20 p-12 text-center">
+              <Shield className="h-10 w-10 text-muted-foreground/40" />
+              <div>
+                <p className="font-semibold text-foreground">Access Restricted</p>
+                <p className="mt-1 text-sm text-muted-foreground">You don&apos;t have access to any report sections. Contact your administrator.</p>
+              </div>
+            </div>
+          )}
 
           {/* ─── Pump Reports ────────────────────────────────────────── */}
           {activeTab === 'pump' && (

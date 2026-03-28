@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MainLayout } from '@/components/MainLayout';
 import { RoleGuard } from '@/components/RoleGuard';
 import { RoleBadge } from '@/components/RoleBadge';
-import { useRole, UserRole, PagePermission, PermissionModule, PermissionAction, ALL_ROLES, ALL_PAGES, ROLE_LABELS, PAGE_LABELS, ROLE_DEFAULT_PERMISSIONS } from '@/hooks/useRole';
+import { useRole, UserRole, PagePermission, PermissionModule, PermissionAction, ALL_ROLES, ALL_PAGES, ROLE_LABELS, PAGE_LABELS, ROLE_DEFAULT_PERMISSIONS, SUBPAGE_DEFINITIONS } from '@/hooks/useRole';
 import { RootState, AppDispatch } from '@/store/store';
 import { fetchSystemConfig, setMode, setAdminAccessMode, SystemMode, AdminAccessMode } from '@/store/slices/configSlice';
 import { API_BASE_URL, API_ENDPOINTS } from '@/lib/config';
@@ -32,6 +32,7 @@ interface AdminUser {
   email: string;
   role: UserRole;
   permissions: PagePermission[];
+  subpagePermissions?: string[];
   isActive: boolean;
   authProvider: 'local' | 'google';
   createdAt: string;
@@ -41,6 +42,8 @@ interface AdminUser {
   department?: string;
   village?: string;
   project?: string;
+  userType?: 'individual' | 'team';
+  purposeType?: string;
 }
 
 interface Stats {
@@ -70,6 +73,7 @@ interface EditForm {
   project: string;
   role: UserRole;
   permissions: PagePermission[];
+  subpagePermissions: string[];
 }
 
 interface DynamicRole {
@@ -165,7 +169,9 @@ const PAGE_INFO: Record<PagePermission, { desc: string; color: string }> = {
   tickets:      { desc: 'Ticket management',             color: 'bg-yellow-500/20 text-yellow-400' },
   documents:    { desc: 'Document management',           color: 'bg-pink-500/20 text-pink-400' },
   billing_view: { desc: 'Billing & finance',             color: 'bg-green-500/20 text-green-400' },
+  console:      { desc: 'IoT Console dashboards',         color: 'bg-teal-500/20 text-teal-400' },
   admin:        { desc: 'Admin panel (restricted)',      color: 'bg-red-500/20 text-red-400' },
+  super_admin:  { desc: 'Super Admin features',          color: 'bg-purple-500/20 text-purple-400' },
 };
 
 const PERMISSION_MODULES: { id: PermissionModule; label: string; color: string }[] = [
@@ -220,51 +226,187 @@ function Toast({ toast }: { toast: { msg: string; type: 'success' | 'error' } | 
   );
 }
 
-// ─── Permission Checkbox Grid ─────────────────────────────────────────────────
+// ─── Hierarchical Permission Grid ────────────────────────────────────────────
 
+const SUBPAGE_LABELS: Record<string, string> = {
+  'admin.users':          'Users',
+  'admin.roles':          'Roles',
+  'admin.teams':          'Teams',
+  'admin.system':         'System',
+  'admin.infrastructure': 'Infrastructure',
+  'admin.activity':       'Activity Log',
+  'reports.pump':         'Pump Reports',
+  'reports.electrical':   'Electrical',
+  'reports.oms':          'OMS Maintenance',
+  'reports.rssi':         'RSSI / TTN',
+  'devices.lorawan':      'LoRaWAN',
+  'devices.wifi':         'Wi-Fi',
+  'devices.gsm':          'GSM',
+  'devices.bluetooth':    'Bluetooth',
+};
+
+function HierarchicalPermissionGrid({
+  selected,
+  selectedSubpages,
+  onChange,
+  disabled = false,
+  canGrantSuperAdmin = false,
+}: {
+  selected: PagePermission[];
+  selectedSubpages: string[];
+  onChange: (perms: PagePermission[], subpages: string[]) => void;
+  disabled?: boolean;
+  canGrantSuperAdmin?: boolean;
+}) {
+  const [expanded, setExpanded] = useState<Set<PagePermission>>(new Set());
+
+  const togglePage = (p: PagePermission) => {
+    if (p === 'admin' || p === 'super_admin') return;
+    const newSelected = selected.includes(p) ? selected.filter(x => x !== p) : [...selected, p];
+    // When removing a page, also remove its subpages
+    const newSubpages = selected.includes(p)
+      ? selectedSubpages.filter(s => !s.startsWith(`${p}.`))
+      : selectedSubpages;
+    onChange(newSelected, newSubpages);
+  };
+
+  const toggleSubpage = (subpage: string) => {
+    const newSubpages = selectedSubpages.includes(subpage)
+      ? selectedSubpages.filter(s => s !== subpage)
+      : [...selectedSubpages, subpage];
+    onChange(selected, newSubpages);
+  };
+
+  const toggleExpand = (p: PagePermission) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(p)) next.delete(p); else next.add(p);
+      return next;
+    });
+  };
+
+  const toggleAllSubpages = (p: PagePermission, subpages: string[]) => {
+    const allChecked = subpages.every(s => selectedSubpages.includes(s));
+    const newSubpages = allChecked
+      ? selectedSubpages.filter(s => !subpages.includes(s))
+      : [...new Set([...selectedSubpages, ...subpages])];
+    onChange(selected, newSubpages);
+  };
+
+  const visiblePages = canGrantSuperAdmin ? ALL_PAGES : ALL_PAGES.filter(p => p !== 'super_admin');
+
+  return (
+    <div className="space-y-1.5">
+      {visiblePages.map(p => {
+        const checked = selected.includes(p);
+        const isLocked = p === 'admin' || p === 'super_admin';
+        const subpages = SUBPAGE_DEFINITIONS[p] || [];
+        const hasSubpages = subpages.length > 0;
+        const isExpanded = expanded.has(p);
+        const allSubChecked = subpages.length > 0 && subpages.every(s => selectedSubpages.includes(s));
+
+        return (
+          <div key={p}>
+            <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-all ${
+              checked
+                ? 'border-brand-500/50 bg-brand-500/10 text-foreground'
+                : 'border-border/30 bg-secondary/20 text-muted-foreground'
+            } ${disabled || isLocked ? 'opacity-50' : ''}`}>
+              <button
+                type="button"
+                disabled={disabled || isLocked}
+                onClick={() => togglePage(p)}
+                className="flex items-center gap-2 flex-1 min-w-0 text-left"
+              >
+                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                  checked ? 'bg-brand-500 border-brand-500' : 'border-border/50'
+                }`}>
+                  {checked && <Check className="h-2.5 w-2.5 text-white" />}
+                </span>
+                <span className="font-medium truncate">{PAGE_LABELS[p]}</span>
+              </button>
+              {hasSubpages && checked && (
+                <button
+                  type="button"
+                  onClick={() => toggleExpand(p)}
+                  className="p-0.5 rounded text-muted-foreground/60 hover:text-foreground transition-colors shrink-0"
+                  title={isExpanded ? 'Collapse subpages' : 'Expand subpages'}
+                >
+                  {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+              )}
+            </div>
+
+            {/* Subpages */}
+            {hasSubpages && checked && isExpanded && (
+              <div className="ml-4 mt-1 space-y-1 pl-3 border-l border-border/30">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wide">Sub-sections</span>
+                  <button
+                    type="button"
+                    onClick={() => toggleAllSubpages(p, subpages)}
+                    className="text-[10px] text-brand-400 hover:text-brand-300 transition-colors"
+                  >
+                    {allSubChecked ? 'Deselect all' : 'Select all'}
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-1">
+                  {subpages.map(sub => {
+                    const subChecked = selectedSubpages.includes(sub);
+                    return (
+                      <button
+                        key={sub}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => toggleSubpage(sub)}
+                        className={`flex items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-[11px] transition-all border ${
+                          subChecked
+                            ? 'border-brand-500/30 bg-brand-500/8 text-foreground'
+                            : 'border-border/20 bg-secondary/10 text-muted-foreground hover:border-brand-500/20'
+                        } ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                      >
+                        <span className={`flex h-3 w-3 shrink-0 items-center justify-center rounded border ${
+                          subChecked ? 'bg-brand-500 border-brand-500' : 'border-border/40'
+                        }`}>
+                          {subChecked && <Check className="h-2 w-2 text-white" />}
+                        </span>
+                        <span className="truncate">{SUBPAGE_LABELS[sub] || sub.split('.')[1]}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[10px] text-muted-foreground/40 mt-1">
+                  Empty = unrestricted access to all sections
+                </p>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Keep old PermissionGrid as alias for backward compat
 function PermissionGrid({
   selected,
   onChange,
   disabled = false,
+  canGrantSuperAdmin = false,
 }: {
   selected: PagePermission[];
   onChange: (perms: PagePermission[]) => void;
   disabled?: boolean;
+  canGrantSuperAdmin?: boolean;
 }) {
-  const toggle = (p: PagePermission) => {
-    if (p === 'admin') return; // admin permission is always locked
-    onChange(
-      selected.includes(p) ? selected.filter(x => x !== p) : [...selected, p]
-    );
-  };
-
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-      {ALL_PAGES.map(p => {
-        const checked = selected.includes(p);
-        const isLocked = p === 'admin';
-        return (
-          <button
-            key={p}
-            type="button"
-            disabled={disabled || isLocked}
-            onClick={() => toggle(p)}
-            className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs transition-all ${
-              checked
-                ? 'border-brand-500/50 bg-brand-500/10 text-foreground'
-                : 'border-border/30 bg-secondary/20 text-muted-foreground'
-            } ${disabled || isLocked ? 'opacity-50 cursor-not-allowed' : 'hover:border-brand-500/30 cursor-pointer'}`}
-          >
-            <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-              checked ? 'bg-brand-500 border-brand-500' : 'border-border/50'
-            }`}>
-              {checked && <Check className="h-2.5 w-2.5 text-white" />}
-            </span>
-            <span className="font-medium truncate">{PAGE_LABELS[p]}</span>
-          </button>
-        );
-      })}
-    </div>
+    <HierarchicalPermissionGrid
+      selected={selected}
+      selectedSubpages={[]}
+      onChange={(perms) => onChange(perms)}
+      disabled={disabled}
+      canGrantSuperAdmin={canGrantSuperAdmin}
+    />
   );
 }
 
@@ -281,9 +423,9 @@ function CreateUserModal({
 }) {
   const [form, setForm] = useState<CreateForm>({
     name: '', email: '', password: '', confirmPassword: '',
-    role: 'operator',
+    role: 'ews',
     phone: '', department: '', village: '', project: '',
-    permissions: ROLE_DEFAULT_PERMISSIONS['operator'],
+    permissions: ROLE_DEFAULT_PERMISSIONS['ews'],
   });
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -498,7 +640,7 @@ function CreateUserModal({
                   onChange={e => handleRoleChange(e.target.value as UserRole)}
                   className="w-full h-9 rounded-lg border border-border/50 bg-background px-3 text-sm dark:[color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-brand-500/30"
                 >
-                  {ALL_ROLES.filter(r => r !== 'admin').map(r => (
+                  {ALL_ROLES.map(r => (
                     <option key={r} value={r}>{ROLE_LABELS[r]}</option>
                   ))}
                 </select>
@@ -548,6 +690,7 @@ function CreateUserModal({
 function EditUserDrawer({
   user: targetUser,
   currentUserId,
+  isSuperAdmin,
   token,
   onClose,
   onUpdated,
@@ -555,6 +698,7 @@ function EditUserDrawer({
 }: {
   user: AdminUser;
   currentUserId: string | undefined;
+  isSuperAdmin: boolean;
   token: string | null;
   onClose: () => void;
   onUpdated: (updated: AdminUser) => void;
@@ -568,11 +712,12 @@ function EditUserDrawer({
     project: targetUser.project || '',
     role: targetUser.role,
     permissions: targetUser.permissions || [],
+    subpagePermissions: targetUser.subpagePermissions || [],
   });
   const [saving, setSaving] = useState(false);
   const [activeSection, setActiveSection] = useState<'profile' | 'role' | 'permissions'>('profile');
 
-  const isAdminUser = targetUser.email === 'spaceautomation29@gmail.com';
+  const isProtected = !isSuperAdmin && (targetUser.role === 'admin' || targetUser.role === 'super_admin');
   const isSelf = targetUser._id === currentUserId;
   const authHdr = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
 
@@ -636,7 +781,7 @@ function EditUserDrawer({
       const res = await fetch(`${API_BASE_URL}/api/admin/users/${targetUser._id}/permissions`, {
         method: 'PATCH',
         headers: authHdr,
-        body: JSON.stringify({ permissions: form.permissions }),
+        body: JSON.stringify({ permissions: form.permissions, subpagePermissions: form.subpagePermissions }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error);
@@ -752,7 +897,7 @@ function EditUserDrawer({
                 <RoleBadge role={targetUser.role} size="md" showFull />
               </div>
 
-              {!isAdminUser && !isSelf && (
+              {!isProtected && !isSelf && (
                 <>
                   <div>
                     <label className="block text-xs font-medium text-muted-foreground mb-1.5">Change Role</label>
@@ -761,7 +906,7 @@ function EditUserDrawer({
                       onChange={e => handleRoleChange(e.target.value as UserRole)}
                       className="w-full h-9 rounded-lg border border-border/50 bg-background px-3 text-sm dark:[color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-brand-500/30"
                     >
-                      {ALL_ROLES.filter(r => r !== 'admin').map(r => (
+                      {ALL_ROLES.map(r => (
                         <option key={r} value={r}>{ROLE_LABELS[r]}</option>
                       ))}
                     </select>
@@ -782,9 +927,9 @@ function EditUserDrawer({
                 </>
               )}
 
-              {(isAdminUser || isSelf) && (
+              {(isProtected || isSelf) && (
                 <p className="text-xs text-muted-foreground text-center">
-                  {isAdminUser ? 'Admin role cannot be changed.' : 'Cannot change your own role.'}
+                  {isProtected ? 'This account\'s role cannot be changed.' : 'Cannot change your own role.'}
                 </p>
               )}
             </>
@@ -804,12 +949,14 @@ function EditUserDrawer({
                   Reset to role defaults
                 </button>
               </div>
-              <PermissionGrid
+              <HierarchicalPermissionGrid
                 selected={form.permissions}
-                onChange={perms => setForm(f => ({ ...f, permissions: perms }))}
-                disabled={isAdminUser}
+                selectedSubpages={form.subpagePermissions}
+                onChange={(perms, subpages) => setForm(f => ({ ...f, permissions: perms, subpagePermissions: subpages }))}
+                disabled={isProtected}
+                canGrantSuperAdmin={isSuperAdmin}
               />
-              {!isAdminUser && (
+              {!isProtected && (
                 <Button
                   size="sm"
                   onClick={savePermissions}
@@ -831,7 +978,7 @@ function EditUserDrawer({
 // ─── Main Admin Page ──────────────────────────────────────────────────────────
 
 export default function AdminPage() {
-  useRole();
+  const { isSuperAdmin, userType } = useRole();
   const dispatch = useDispatch<AppDispatch>();
   const token = useSelector((s: RootState) => s.auth.token);
   const currentUser = useSelector((s: RootState) => s.auth.user);
@@ -1157,8 +1304,7 @@ export default function AdminPage() {
     if (!stats) return null;
 
     const topRoles = ALL_ROLES
-      .filter(r => r !== 'admin')
-      .map(r => ({ role: r, ...( stats.roles[r] || { total: 0, active: 0 }) }))
+      .map(r => ({ role: r, ...(stats.roles[r] || { total: 0, active: 0 }) }))
       .filter(r => r.total > 0)
       .sort((a, b) => b.total - a.total);
 
@@ -1323,7 +1469,7 @@ export default function AdminPage() {
         // Grid view
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {filteredUsers.map(u => {
-            const isAdminUser = u.email === 'spaceautomation29@gmail.com';
+            const isProtected = !isSuperAdmin && (u.role === 'admin' || u.role === 'super_admin');
             const isSelf = u._id === currentUser?._id;
             const isBusy = updating === u._id;
             return (
@@ -1351,7 +1497,7 @@ export default function AdminPage() {
                 <div className="flex items-center justify-between">
                   <RoleBadge role={u.role} size="sm" showFull />
                   <div className="flex items-center gap-1">
-                    {!isAdminUser && !isSelf && (
+                    {!isProtected && !isSelf && (
                       <button
                         disabled={isBusy}
                         onClick={() => handleToggleActive(u._id, u.isActive)}
@@ -1364,14 +1510,16 @@ export default function AdminPage() {
                           u.isActive ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
                       </button>
                     )}
-                    <button
-                      onClick={() => setEditingUser(u)}
-                      className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors"
-                      title="Edit"
-                    >
-                      <SlidersHorizontal className="h-3.5 w-3.5" />
-                    </button>
-                    {!isAdminUser && !isSelf && (
+                    {!isProtected && (
+                      <button
+                        onClick={() => setEditingUser(u)}
+                        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors"
+                        title="Edit"
+                      >
+                        <SlidersHorizontal className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    {!isProtected && !isSelf && (
                       <button
                         disabled={isBusy}
                         onClick={() => handleDeleteUser(u)}
@@ -1409,7 +1557,7 @@ export default function AdminPage() {
               </thead>
               <tbody className="divide-y divide-border/10">
                 {filteredUsers.map(u => {
-                  const isAdminUser = u.email === 'spaceautomation29@gmail.com';
+                  const isProtected = !isSuperAdmin && (u.role === 'admin' || u.role === 'super_admin');
                   const isSelf = u._id === currentUser?._id;
                   const isBusy = updating === u._id;
                   return (
@@ -1476,14 +1624,16 @@ export default function AdminPage() {
                       {/* Actions */}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => setEditingUser(u)}
-                            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors"
-                            title="Edit user"
-                          >
-                            <SlidersHorizontal className="h-3.5 w-3.5" />
-                          </button>
-                          {!isAdminUser && !isSelf && (
+                          {!isProtected && (
+                            <button
+                              onClick={() => setEditingUser(u)}
+                              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors"
+                              title="Edit user"
+                            >
+                              <SlidersHorizontal className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                          {!isProtected && !isSelf && (
                             <>
                               <button
                                 disabled={isBusy}
@@ -2417,18 +2567,23 @@ export default function AdminPage() {
 
   // ─── Render ─────────────────────────────────────────────────────────────────
 
+  // Teams tab hidden in single mode OR for individual userType users
+  const showTeamsTab = systemMode !== 'single' && userType !== 'individual';
+  // System tab (dangerous config) is super_admin only
+  const showSystemTab = isSuperAdmin;
+
   const tabs = [
     { id: 'overview'        as const, label: 'Overview',                      icon: BarChart3 },
     { id: 'users'           as const, label: `Users (${users.length})`,        icon: Users },
     { id: 'infrastructure'  as const, label: `Infrastructure`,                 icon: Network },
     { id: 'roles'           as const, label: 'Roles',                          icon: Shield },
-    { id: 'teams'           as const, label: 'Teams',                          icon: UsersRound },
-    { id: 'system'          as const, label: 'System',                         icon: Settings },
+    ...(showTeamsTab ? [{ id: 'teams'  as const, label: 'Teams',  icon: UsersRound }] : []),
+    ...(showSystemTab ? [{ id: 'system' as const, label: 'System', icon: Settings  }] : []),
   ];
 
   return (
     <MainLayout>
-      <RoleGuard roles={['admin']} showDenied>
+      <RoleGuard roles={['admin', 'super_admin']} showDenied>
         <div className="container max-w-7xl px-3 sm:px-4 py-6 sm:py-8 space-y-6">
 
           {/* Header */}
@@ -2530,6 +2685,7 @@ export default function AdminPage() {
             <EditUserDrawer
               user={editingUser}
               currentUserId={currentUser?._id}
+              isSuperAdmin={isSuperAdmin}
               token={token}
               onClose={() => setEditingUser(null)}
               onUpdated={(updated) => {

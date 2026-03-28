@@ -24,6 +24,7 @@ import ticketRoutes from './routes/ticketRoutes';
 import roleRoutes from './routes/roleRoutes';
 import teamRoutes from './routes/teamRoutes';
 import activityLogRoutes from './routes/activityLogRoutes';
+import consoleDashboardRoutes from './routes/consoleDashboardRoutes';
 import { Device } from './models/Device';
 import { NetworkDevice } from './models/NetworkDevice';
 import { Manifold } from './models/Manifold';
@@ -69,8 +70,12 @@ app.use(secureCookieFlags(isProduction));
 
 const corsOptions = {
   origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-    // Allow requests with no origin (server-to-server, Postman, etc.)
-    if (!origin) return callback(null, true);
+    // Allow requests with no origin in development only (Postman, curl, server-to-server)
+    // In production, require an explicit Origin header to prevent CORS bypass
+    if (!origin) {
+      if (isProduction) return callback(new Error('CORS: origin header required in production'));
+      return callback(null, true);
+    }
 
     // Production allowed origins
     const productionOrigins = [
@@ -112,6 +117,11 @@ app.use(express.json());
 // Keep track of devices and their last seen time
 const deviceHeartbeats = new Map<string, Date>();
 
+// Escape special regex characters from a string to prevent regex injection
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 // MQTT message handler function - works with both Aedes and AWS IoT
 const handleMqttMessage = async (topic: string, message: Buffer) => {
   const topicParts = topic.split('/');
@@ -135,7 +145,7 @@ const handleMqttMessage = async (topic: string, message: Buffer) => {
 
         if (!updatedDevice) {
           updatedDevice = await Device.findOneAndUpdate(
-            { mqttTopic: { $regex: `/${deviceId}$`, $options: 'i' } },
+            { mqttTopic: { $regex: `/${escapeRegex(deviceId)}$`, $options: 'i' } },
             { status: isOnline ? 'online' : 'offline', lastSeen: new Date() },
             { new: true }
           );
@@ -180,7 +190,7 @@ const handleMqttMessage = async (topic: string, message: Buffer) => {
 
           if (!updatedDevice) {
             updatedDevice = await Device.findOneAndUpdate(
-              { mqttTopic: { $regex: `/${deviceId}$`, $options: 'i' } },
+              { mqttTopic: { $regex: `/${escapeRegex(deviceId)}$`, $options: 'i' } },
               {
                 $set: {
                   status: 'online',
@@ -259,7 +269,8 @@ const handleMqttMessage = async (topic: string, message: Buffer) => {
       console.log(`Processing manifold ${type} for ${manifoldId}`);
 
       if (type === 'status') {
-        const statusData = JSON.parse(message.toString());
+        let statusData: any;
+        try { statusData = JSON.parse(message.toString()); } catch { console.warn(`Invalid JSON in manifold status from ${manifoldId}`); return; }
         const manifold = await Manifold.findOne({ manifoldId });
         if (manifold) {
           for (const valveData of statusData.valves || []) {
@@ -738,6 +749,7 @@ app.use('/api/tickets', ticketRoutes);
 app.use('/api/roles', roleRoutes);
 app.use('/api/teams', teamRoutes);
 app.use('/api/activity-logs', activityLogRoutes);
+app.use('/api/console/dashboards', consoleDashboardRoutes);
 
 // ============================================================
 // ===== SERVER STARTUP =====

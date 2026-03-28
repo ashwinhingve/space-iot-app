@@ -70,6 +70,7 @@ const ticketRoutes_1 = __importDefault(require("./routes/ticketRoutes"));
 const roleRoutes_1 = __importDefault(require("./routes/roleRoutes"));
 const teamRoutes_1 = __importDefault(require("./routes/teamRoutes"));
 const activityLogRoutes_1 = __importDefault(require("./routes/activityLogRoutes"));
+const consoleDashboardRoutes_1 = __importDefault(require("./routes/consoleDashboardRoutes"));
 const Device_1 = require("./models/Device");
 const NetworkDevice_1 = require("./models/NetworkDevice");
 const Manifold_1 = require("./models/Manifold");
@@ -107,9 +108,13 @@ app.use((0, securityHeaders_1.securityHeaders)(isProduction));
 app.use((0, securityHeaders_1.secureCookieFlags)(isProduction));
 const corsOptions = {
     origin: (origin, callback) => {
-        // Allow requests with no origin (server-to-server, Postman, etc.)
-        if (!origin)
+        // Allow requests with no origin in development only (Postman, curl, server-to-server)
+        // In production, require an explicit Origin header to prevent CORS bypass
+        if (!origin) {
+            if (isProduction)
+                return callback(new Error('CORS: origin header required in production'));
             return callback(null, true);
+        }
         // Production allowed origins
         const productionOrigins = [
             'https://iot.spaceautotech.com',
@@ -144,6 +149,10 @@ app.use((0, cors_1.default)(corsOptions));
 app.use(express_1.default.json());
 // Keep track of devices and their last seen time
 const deviceHeartbeats = new Map();
+// Escape special regex characters from a string to prevent regex injection
+function escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 // MQTT message handler function - works with both Aedes and AWS IoT
 const handleMqttMessage = (topic, message) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d, _e, _f, _g;
@@ -159,7 +168,7 @@ const handleMqttMessage = (topic, message) => __awaiter(void 0, void 0, void 0, 
                 console.log(`Processing online status for device ${deviceId}: ${isOnline}`);
                 let updatedDevice = yield Device_1.Device.findOneAndUpdate({ mqttTopic: `devices/${deviceId}` }, { status: isOnline ? 'online' : 'offline', lastSeen: new Date() }, { new: true });
                 if (!updatedDevice) {
-                    updatedDevice = yield Device_1.Device.findOneAndUpdate({ mqttTopic: { $regex: `/${deviceId}$`, $options: 'i' } }, { status: isOnline ? 'online' : 'offline', lastSeen: new Date() }, { new: true });
+                    updatedDevice = yield Device_1.Device.findOneAndUpdate({ mqttTopic: { $regex: `/${escapeRegex(deviceId)}$`, $options: 'i' } }, { status: isOnline ? 'online' : 'offline', lastSeen: new Date() }, { new: true });
                 }
                 if (updatedDevice) {
                     console.log(`Updated device status: ${updatedDevice._id} -> ${updatedDevice.status}`);
@@ -194,7 +203,7 @@ const handleMqttMessage = (topic, message) => __awaiter(void 0, void 0, void 0, 
                         }
                     }, { new: true });
                     if (!updatedDevice) {
-                        updatedDevice = yield Device_1.Device.findOneAndUpdate({ mqttTopic: { $regex: `/${deviceId}$`, $options: 'i' } }, {
+                        updatedDevice = yield Device_1.Device.findOneAndUpdate({ mqttTopic: { $regex: `/${escapeRegex(deviceId)}$`, $options: 'i' } }, {
                             $set: {
                                 status: 'online',
                                 lastSeen: new Date(),
@@ -267,7 +276,14 @@ const handleMqttMessage = (topic, message) => __awaiter(void 0, void 0, void 0, 
             const manifoldId = deviceId;
             console.log(`Processing manifold ${type} for ${manifoldId}`);
             if (type === 'status') {
-                const statusData = JSON.parse(message.toString());
+                let statusData;
+                try {
+                    statusData = JSON.parse(message.toString());
+                }
+                catch (_h) {
+                    console.warn(`Invalid JSON in manifold status from ${manifoldId}`);
+                    return;
+                }
                 const manifold = yield Manifold_1.Manifold.findOne({ manifoldId });
                 if (manifold) {
                     for (const valveData of statusData.valves || []) {
@@ -692,6 +708,7 @@ app.use('/api/tickets', ticketRoutes_1.default);
 app.use('/api/roles', roleRoutes_1.default);
 app.use('/api/teams', teamRoutes_1.default);
 app.use('/api/activity-logs', activityLogRoutes_1.default);
+app.use('/api/console/dashboards', consoleDashboardRoutes_1.default);
 // ============================================================
 // ===== SERVER STARTUP =====
 // ============================================================

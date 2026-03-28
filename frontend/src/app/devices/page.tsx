@@ -41,6 +41,7 @@ import { DeviceSection } from '@/components/network-devices/DeviceSection';
 import { AddDeviceModal } from '@/components/network-devices/AddDeviceModal';
 import { LoRaWANCard } from '@/components/network-devices/LoRaWANCard';
 import { useSocketTTN } from '@/hooks/useSocketTTN';
+import { useRole } from '@/hooks/useRole';
 
 // ─── Stats / Tab config ────────────────────────────────────────────────────────
 
@@ -1063,7 +1064,9 @@ export default function DevicesPage() {
   const manifoldsState = useSelector((s: RootState) => s.manifolds);
   const manifolds = manifoldsState.manifolds ?? [];
 
-  const [activeTab, setActiveTab] = useState<NetworkProtocol>('lorawan');
+  const { canAccessSubpage } = useRole();
+  const visibleProtocols = STAT_META.filter(s => canAccessSubpage('devices', s.key));
+  const [activeTab, setActiveTab] = useState<NetworkProtocol>(() => visibleProtocols[0]?.protocol ?? 'lorawan');
   const [modalOpen, setModalOpen] = useState(false);
   const [modalProtocol, setModalProtocol] = useState<NetworkProtocol | null>(null);
   const [editDevice, setEditDevice] = useState<NetworkDevice | null>(null);
@@ -1290,7 +1293,7 @@ export default function DevicesPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1, duration: 0.4 }}
           >
-            {STAT_META.map((s) => {
+            {visibleProtocols.map((s) => {
               const isActive = s.protocol !== undefined && s.protocol === activeTab;
               const isClickable = s.protocol !== undefined;
               return (

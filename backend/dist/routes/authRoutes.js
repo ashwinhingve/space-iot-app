@@ -15,5 +15,7 @@ router.post('/google', rateLimiter_1.authLimiter, authController_1.googleAuth);
 router.post('/setup', rateLimiter_1.authLimiter, authController_1.setupSystem); // First-time individual mode setup
 // Protected routes (require authentication)
 router.get('/me', auth_1.auth, authController_1.getMe);
+router.put('/profile', auth_1.auth, authController_1.updateProfile);
+router.put('/password', auth_1.auth, authController_1.updatePassword);
 router.post('/logout', auth_1.auth, authController_1.logout);
 exports.default = router;

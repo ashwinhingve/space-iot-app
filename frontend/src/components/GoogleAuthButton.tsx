@@ -48,9 +48,14 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({
   const handleCredentialResponse = React.useCallback(async (response: { credential: string }) => {
     setIsLoading(true);
     try {
-      await dispatch(googleLogin({ credential: response.credential })).unwrap();
+      const result = await dispatch(googleLogin({ credential: response.credential })).unwrap();
       onSuccess?.();
-      router.push(redirectTo);
+      // New Google users without userType go to onboarding
+      if (result.isNewUser) {
+        router.push('/onboarding');
+      } else {
+        router.push(redirectTo);
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Google sign-in failed';
       console.error('Google sign-in error:', error);

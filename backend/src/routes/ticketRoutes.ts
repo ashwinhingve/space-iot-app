@@ -12,6 +12,8 @@ import {
   reopenTicket,
   addComment,
   addDocument,
+  addNote,
+  assignTicket,
 } from '../controllers/ticketController';
 
 const router = Router();
@@ -29,5 +31,7 @@ router.post('/:id/reject',         rejectTicket);
 router.post('/:id/reopen',         reopenTicket);
 router.post('/:id/comments',       addComment);
 router.post('/:id/documents',      addDocument);
+router.post('/:id/notes',          addNote);
+router.patch('/:id/assign',        assignTicket);
 
 export default router;

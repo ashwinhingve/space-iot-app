@@ -15,6 +15,8 @@ export const API_ENDPOINTS = {
   ME: `${API_BASE_URL}/api/auth/me`,
   LOGOUT: `${API_BASE_URL}/api/auth/logout`,
   SETUP: `${API_BASE_URL}/api/auth/setup`,   // First-time individual mode setup
+  AUTH_PROFILE: `${API_BASE_URL}/api/auth/profile`,
+  AUTH_PASSWORD: `${API_BASE_URL}/api/auth/password`,
 
   // Devices
   DEVICES: `${API_BASE_URL}/api/devices`,
@@ -91,6 +93,8 @@ export const API_ENDPOINTS = {
   TICKET_REOPEN: (id: string) => `${API_BASE_URL}/api/tickets/${id}/reopen`,
   TICKET_COMMENT: (id: string) => `${API_BASE_URL}/api/tickets/${id}/comments`,
   TICKET_DOCUMENT: (id: string) => `${API_BASE_URL}/api/tickets/${id}/documents`,
+  TICKET_NOTE: (id: string) => `${API_BASE_URL}/api/tickets/${id}/notes`,
+  TICKET_ASSIGN: (id: string) => `${API_BASE_URL}/api/tickets/${id}/assign`,
 
   // Roles
   ROLES: `${API_BASE_URL}/api/roles`,
@@ -117,6 +121,14 @@ export const API_ENDPOINTS = {
   ADMIN_USER_ACTIVE: (id: string) => `${API_BASE_URL}/api/admin/users/${id}/active`,
   ADMIN_DELETE_USER: (id: string) => `${API_BASE_URL}/api/admin/users/${id}`,
   ADMIN_STATS: `${API_BASE_URL}/api/admin/stats`,
+
+  // Console Dashboards
+  CONSOLE_DASHBOARDS: `${API_BASE_URL}/api/console/dashboards`,
+  CONSOLE_DASHBOARD: (id: string) => `${API_BASE_URL}/api/console/dashboards/${id}`,
+  CONSOLE_DASHBOARD_LAYOUT: (id: string) => `${API_BASE_URL}/api/console/dashboards/${id}/layout`,
+  CONSOLE_DASHBOARD_WIDGETS: (id: string) => `${API_BASE_URL}/api/console/dashboards/${id}/widgets`,
+  CONSOLE_DASHBOARD_WIDGET: (id: string, wId: string) => `${API_BASE_URL}/api/console/dashboards/${id}/widgets/${wId}`,
+  CONSOLE_TEMPLATES: `${API_BASE_URL}/api/console/dashboards/templates`,
 };
 
 // Socket.io Configuration

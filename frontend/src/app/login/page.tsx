@@ -9,7 +9,7 @@ import { login, clearError } from '@/store/slices/authSlice';
 import { GoogleAuthButton } from '@/components/GoogleAuthButton';
 import { RootState, AppDispatch } from '@/store/store';
 import {
-  ArrowRight, Lock, Mail, AlertCircle, Zap, Eye, EyeOff,
+  ArrowRight, Lock, Mail, AlertCircle, Eye, EyeOff,
   Shield, Users, Activity, Radio, BarChart3, Ticket,
 } from 'lucide-react';
 
@@ -79,21 +79,43 @@ function CircuitBoard() {
 
 // ─── Form ─────────────────────────────────────────────────────────────────────
 
+const isBrowser = typeof window !== 'undefined';
+
 function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
+  const [loginMode, setLoginMode] = useState<'individual' | 'team'>(() => {
+    if (isBrowser) {
+      const stored = localStorage.getItem('preferred_login_mode');
+      if (stored === 'individual' || stored === 'team') return stored;
+    }
+    return 'team';
+  });
 
   const dispatch = useDispatch<AppDispatch>();
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirect') || '/dashboard';
 
-  const { loading, error, isAuthenticated } = useSelector((s: RootState) => s.auth);
+  const { loading, error, isAuthenticated, user } = useSelector((s: RootState) => s.auth);
 
   useEffect(() => { dispatch(clearError()); }, [dispatch]);
-  useEffect(() => { if (isAuthenticated) router.push(redirectTo); }, [isAuthenticated, router, redirectTo]);
+  useEffect(() => {
+    if (isAuthenticated) {
+      // Sync preferred login mode with actual user type after successful login
+      if (user?.userType && isBrowser) {
+        localStorage.setItem('preferred_login_mode', user.userType);
+      }
+      router.push(redirectTo);
+    }
+  }, [isAuthenticated, router, redirectTo, user]);
+
+  const handleModeSelect = (m: 'individual' | 'team') => {
+    setLoginMode(m);
+    if (isBrowser) localStorage.setItem('preferred_login_mode', m);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,9 +159,7 @@ function LoginForm() {
         >
           <div className="relative">
             <div className="absolute inset-0 bg-[#00e5ff]/30 rounded-xl blur-md" />
-            <div className="relative w-10 h-10 rounded-xl bg-gradient-to-br from-[#00e5ff] to-brand-600 flex items-center justify-center shadow-[0_0_20px_rgba(0,229,255,0.4)]">
-              <Zap className="w-5 h-5 text-white" strokeWidth={2.5} />
-            </div>
+            <img src="/icon.png" alt="Space IoT" className="relative w-10 h-10 rounded-xl object-contain shadow-[0_0_20px_rgba(0,229,255,0.4)]" />
           </div>
           <div>
             <p className="font-display font-bold text-xl leading-none text-white">
@@ -236,9 +256,7 @@ function LoginForm() {
         <div className="lg:hidden flex items-center gap-2.5 px-6 pt-6">
           <div className="relative">
             <div className="absolute inset-0 bg-[#00e5ff]/20 rounded-xl blur-sm" />
-            <div className="relative w-8 h-8 rounded-xl bg-gradient-to-br from-[#00e5ff] to-brand-600 flex items-center justify-center">
-              <Zap className="w-4 h-4 text-white" strokeWidth={2.5} />
-            </div>
+            <img src="/icon.png" alt="Space IoT" className="relative w-8 h-8 rounded-xl object-contain" />
           </div>
           <span className="font-display font-bold text-xl">
             <span className="text-foreground">Space</span>
@@ -374,18 +392,32 @@ function LoginForm() {
               </button>
             </form>
 
-            {/* Mode info */}
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { icon: Shield, title: 'Individual', desc: 'Single admin, full access', color: 'text-emerald-400', bg: 'bg-emerald-500/5 border-emerald-500/15' },
-                { icon: Users,  title: 'Team',       desc: 'RBAC with role permissions', color: 'text-[#00e5ff]', bg: 'bg-[#00e5ff]/5 border-[#00e5ff]/15' },
-              ].map(c => (
-                <div key={c.title} className={`rounded-xl border p-3 ${c.bg}`}>
-                  <c.icon className={`w-3.5 h-3.5 mb-1.5 ${c.color}`} />
-                  <p className={`text-xs font-semibold ${c.color}`}>{c.title}</p>
-                  <p className="text-[10px] text-muted-foreground/60 mt-0.5 leading-relaxed">{c.desc}</p>
-                </div>
-              ))}
+            {/* Account type selector */}
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Account Type</p>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  { id: 'individual' as const, icon: Shield, title: 'Individual', desc: 'Personal admin, standalone deployment', color: 'text-emerald-400', activeBg: 'bg-emerald-500/8 border-emerald-500/40', inactiveBg: 'bg-emerald-500/3 border-emerald-500/10' },
+                  { id: 'team' as const,       icon: Users,  title: 'Team',       desc: 'Role-based, multi-user collaboration',  color: 'text-[#00e5ff]',  activeBg: 'bg-[#00e5ff]/8 border-[#00e5ff]/40', inactiveBg: 'bg-[#00e5ff]/3 border-[#00e5ff]/10' },
+                ]).map(c => {
+                  const active = loginMode === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => handleModeSelect(c.id)}
+                      className={`rounded-xl border p-3 text-left transition-all duration-150 ${active ? c.activeBg : c.inactiveBg} ${active ? 'ring-1 ring-inset ' + (c.id === 'individual' ? 'ring-emerald-500/30' : 'ring-[#00e5ff]/30') : ''}`}
+                    >
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <c.icon className={`w-3.5 h-3.5 ${active ? c.color : 'text-muted-foreground/50'}`} />
+                        <p className={`text-xs font-semibold ${active ? c.color : 'text-muted-foreground/70'}`}>{c.title}</p>
+                        {active && <span className="ml-auto w-1.5 h-1.5 rounded-full" style={{ background: c.id === 'individual' ? '#22c55e' : '#00e5ff' }} />}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground/50 leading-relaxed">{c.desc}</p>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <p className="text-center text-xs text-muted-foreground/50">

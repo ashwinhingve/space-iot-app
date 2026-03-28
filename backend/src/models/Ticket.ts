@@ -51,6 +51,15 @@ export interface ITicketDocument {
   uploadedAt: Date;
 }
 
+export interface ITicketNote {
+  _id: mongoose.Types.ObjectId;
+  by: mongoose.Types.ObjectId;
+  byName: string;
+  byRole: string;
+  content: string;
+  timestamp: Date;
+}
+
 export interface ITicket extends mongoose.Document {
   ticketNumber: string;
   title: string;
@@ -75,6 +84,7 @@ export interface ITicket extends mongoose.Document {
   workflowHistory: mongoose.Types.DocumentArray<any>;
   comments: mongoose.Types.DocumentArray<any>;
   documents: mongoose.Types.DocumentArray<any>;
+  notes: mongoose.Types.DocumentArray<any>;
 
   // People
   createdBy: mongoose.Types.ObjectId;
@@ -111,6 +121,14 @@ const commentSchema = new mongoose.Schema({
   documentUrl:  { type: String },
   stage:        { type: String, required: true },
   timestamp:    { type: Date, default: Date.now },
+});
+
+const noteSchema = new mongoose.Schema({
+  by:        { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  byName:    { type: String, required: true },
+  byRole:    { type: String, required: true },
+  content:   { type: String, required: true, trim: true },
+  timestamp: { type: Date, default: Date.now },
 });
 
 const documentSchema = new mongoose.Schema({
@@ -156,6 +174,7 @@ const ticketSchema = new mongoose.Schema<ITicket>({
   workflowHistory: [workflowEntrySchema],
   comments:        [commentSchema],
   documents:       [documentSchema],
+  notes:           [noteSchema],
   createdBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   assignedTo:   { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   rejectedFrom:    { type: String },

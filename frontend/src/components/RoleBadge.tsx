@@ -14,7 +14,8 @@ type RoleConfig = {
 };
 
 const ROLE_CONFIG: Record<string, RoleConfig> = {
-  admin:                 { label: 'Admin',            className: 'bg-red-500/15 text-red-400 border-red-500/30',           icon: Crown },
+  super_admin:           { label: 'Super Admin',      className: 'bg-purple-500/15 text-purple-400 border-purple-500/30',  icon: Crown },
+  admin:                 { label: 'Admin',            className: 'bg-red-500/15 text-red-400 border-red-500/30',           icon: Shield },
   ews:                   { label: 'EWS',              className: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',         icon: Radio },
   ows:                   { label: 'OWS',              className: 'bg-blue-500/15 text-blue-400 border-blue-500/30',         icon: Radio },
   wua:                   { label: 'WUA',              className: 'bg-sky-500/15 text-sky-400 border-sky-500/30',            icon: Droplets },

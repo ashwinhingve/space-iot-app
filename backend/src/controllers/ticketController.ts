@@ -60,7 +60,7 @@ export const getTickets = async (req: Request, res: Response) => {
     const filter: any = {};
 
     // Role-based visibility — always see own tickets plus visible stages
-    if (role !== 'admin') {
+    if (role !== 'admin' && role !== 'super_admin') {
       const visibleStages = ROLE_VISIBLE_STAGES[role] ?? [];
       filter.$or = [
         { stage: { $in: visibleStages } },
@@ -111,7 +111,7 @@ export const getTicketStats = async (req: Request, res: Response) => {
   try {
     const role: string = req.user.role;
     const filter: any = {};
-    if (role !== 'admin') {
+    if (role !== 'admin' && role !== 'super_admin') {
       const visibleStages = ROLE_VISIBLE_STAGES[role] ?? [];
       filter.$or = [
         { stage: { $in: visibleStages } },
@@ -163,14 +163,14 @@ export const getTicket = async (req: Request, res: Response) => {
 
 export const createTicket = async (req: Request, res: Response) => {
   try {
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== 'admin' && req.user.role !== 'super_admin') {
       return res.status(403).json({ error: 'Only admin can create tickets' });
     }
 
     const {
       title, description, priority, category,
-      village, minar, projectName, oms, kasra, deadline,
-      contactName, contactMobile, assignedTo, note,
+      village, minar, projectName, oms, deadline,
+      assignedTo, note,
     } = req.body;
 
     if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
@@ -184,10 +184,7 @@ export const createTicket = async (req: Request, res: Response) => {
       minar: minar?.trim(),
       projectName: projectName?.trim(),
       oms: oms?.trim(),
-      kasra: kasra?.trim(),
       deadline: deadline ? new Date(deadline) : undefined,
-      contactName: contactName?.trim(),
-      contactMobile: contactMobile?.trim(),
       createdBy: req.user._id,
       assignedTo: assignedTo || undefined,
       stage: 'draft',
@@ -216,7 +213,7 @@ export const createTicket = async (req: Request, res: Response) => {
 
 export const updateTicket = async (req: Request, res: Response) => {
   try {
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== 'admin' && req.user.role !== 'super_admin') {
       return res.status(403).json({ error: 'Only admin can edit ticket details' });
     }
 
@@ -224,7 +221,7 @@ export const updateTicket = async (req: Request, res: Response) => {
     if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
 
     const allowed = ['title', 'description', 'priority', 'category', 'village', 'minar',
-      'projectName', 'oms', 'kasra', 'deadline', 'contactName', 'contactMobile', 'assignedTo'];
+      'projectName', 'oms', 'deadline', 'assignedTo'];
 
     for (const field of allowed) {
       if (req.body[field] !== undefined) (ticket as any)[field] = req.body[field];
@@ -341,7 +338,7 @@ export const rejectTicket = async (req: Request, res: Response) => {
 
 export const reopenTicket = async (req: Request, res: Response) => {
   try {
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== 'admin' && req.user.role !== 'super_admin') {
       return res.status(403).json({ error: 'Only admin can reopen tickets' });
     }
 
@@ -460,7 +457,7 @@ export const addDocument = async (req: Request, res: Response) => {
 
 export const deleteTicket = async (req: Request, res: Response) => {
   try {
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== 'admin' && req.user.role !== 'super_admin') {
       return res.status(403).json({ error: 'Only admin can delete tickets' });
     }
     const ticket = await Ticket.findById(req.params.id);
@@ -470,5 +467,71 @@ export const deleteTicket = async (req: Request, res: Response) => {
     res.json({ success: true, message: 'Ticket deleted' });
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete ticket' });
+  }
+};
+
+// ── POST /api/tickets/:id/notes ─────────────────────────────────────────────
+
+export const addNote = async (req: Request, res: Response) => {
+  try {
+    const ticket = await Ticket.findById(req.params.id);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+
+    const { content } = req.body;
+    if (!content?.trim()) return res.status(400).json({ error: 'Note content is required' });
+
+    ticket.notes.push({
+      by: req.user._id,
+      byName: req.user.name,
+      byRole: req.user.role,
+      content: content.trim(),
+      timestamp: new Date(),
+    } as any);
+
+    await ticket.save();
+    await ticket.populate('createdBy', 'name email role');
+    await ticket.populate('assignedTo', 'name email role');
+
+    res.json({ success: true, ticket });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to add note' });
+  }
+};
+
+// ── PATCH /api/tickets/:id/assign — admin/super_admin only ──────────────────
+
+export const assignTicket = async (req: Request, res: Response) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Only admin can assign tickets' });
+    }
+
+    const ticket = await Ticket.findById(req.params.id);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+
+    const { assignedTo } = req.body;
+    const prevAssignee = ticket.assignedTo?.toString();
+    ticket.assignedTo = assignedTo || undefined;
+
+    const note = assignedTo
+      ? `Ticket assigned to a team member`
+      : 'Ticket assignment removed';
+
+    ticket.workflowHistory.push({
+      stage: ticket.stage,
+      action: 'assigned',
+      ...actor(req.user),
+      comment: (req.body.note?.trim()) || note,
+      timestamp: new Date(),
+    });
+
+    await ticket.save();
+    await ticket.populate('createdBy', 'name email role');
+    await ticket.populate('assignedTo', 'name email role');
+
+    console.log(`Ticket ${ticket.ticketNumber} assigned by ${req.user.email} (prev: ${prevAssignee ?? 'none'})`);
+    res.json({ success: true, ticket });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to assign ticket' });
   }
 };
